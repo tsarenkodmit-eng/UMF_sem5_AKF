@@ -1,0 +1,75 @@
+name: Build final Task 1 and Task 2 PDFs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/build-final-pdfs.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: final-task-pdfs
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PDF and scientific-computing dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y texlive-xetex texlive-latex-extra texlive-fonts-recommended texlive-lang-cyrillic fonts-dejavu-core
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt scipy
+
+      - name: Decode the detailed LaTeX reports
+        run: |
+          python - <<'PY'
+          import base64
+          import gzip
+          from pathlib import Path
+          for encoded, target in [
+              (".build/Task1.tex.gz.b64", "Task1.tex"),
+              (".build/Task2.tex.gz.b64", "Task2.tex"),
+          ]:
+              data = base64.b64decode(Path(encoded).read_text(encoding="ascii").strip())
+              Path(target).write_bytes(gzip.decompress(data))
+          PY
+
+      - name: Run both numerical solvers
+        run: |
+          python task1_wave.py --output-dir .build/task1
+          python task2_burgers.py --output-dir .build/task2
+          cp .build/task1/task1_displacement.png task1_displacement.png
+          cp .build/task2/task2_burgers_profiles.png task2_burgers_profiles.png
+          cp .build/task2/task2_burgers_shock.png task2_burgers_shock.png
+
+      - name: Typeset and cross-reference the PDFs
+        run: |
+          xelatex -interaction=nonstopmode -halt-on-error Task1.tex
+          xelatex -interaction=nonstopmode -halt-on-error Task1.tex
+          xelatex -interaction=nonstopmode -halt-on-error Task2.tex
+          xelatex -interaction=nonstopmode -halt-on-error Task2.tex
+          test -s Task1.pdf
+          test -s Task2.pdf
+          pdfinfo Task1.pdf | grep -E "Pages:|Page size:"
+          pdfinfo Task2.pdf | grep -E "Pages:|Page size:"
+
+      - name: Publish final PDFs to main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Task1.pdf Task2.pdf
+          git commit -m "Publish detailed final PDFs for Tasks 1 and 2"
+          git pull --rebase origin main
+          git push
