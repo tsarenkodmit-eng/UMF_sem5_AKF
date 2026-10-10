@@ -43,7 +43,14 @@ jobs:
               (".build/Task2.tex.gz.b64", "Task2.tex"),
           ]:
               data = base64.b64decode(Path(encoded).read_text(encoding="ascii").strip())
-              Path(target).write_bytes(gzip.decompress(data))
+              decoded = gzip.decompress(data)
+              if target == "Task2.tex":
+                  import hashlib
+                  expected = "4327d19f5631aa3ca7eb229e3f817f5cd32c17d0c59c86341eaa90eb4ff99c26"
+                  actual = hashlib.sha256(decoded).hexdigest()
+                  if actual != expected:
+                      raise RuntimeError(f"Task 2 source SHA-256 mismatch: {actual}")
+              Path(target).write_bytes(decoded)
           PY
 
       - name: Run both numerical solvers
