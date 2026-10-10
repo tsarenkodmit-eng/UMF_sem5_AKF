@@ -69,8 +69,6 @@ jobs:
           xelatex -interaction=nonstopmode -halt-on-error Task2.tex
           test -s Task1.pdf
           test -s Task2.pdf
-          pdfinfo Task1.pdf | grep -E "Pages:|Page size:"
-          pdfinfo Task2.pdf | grep -E "Pages:|Page size:"
 
       - name: Publish final PDFs to main
         run: |
