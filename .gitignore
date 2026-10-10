@@ -1,7 +1,0 @@
-__pycache__/
-*.py[cod]
-results/
-reports/*.aux
-reports/*.log
-reports/*.out
-reports/*.toc
