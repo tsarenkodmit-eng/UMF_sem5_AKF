@@ -174,18 +174,19 @@ def write_outputs(output_dir: Path, p: Parameters) -> dict[str, float]:
         writer.writerow(["r_m", "u_finite_difference_m", "u_analytic_m", "abs_error_m"])
         writer.writerows(zip(r, u_fd, u_exact, absolute_error))
 
-    fig, axes = plt.subplots(1, 2, figsize=(12.4, 4.8), constrained_layout=True)
+    fig, axes = plt.subplots(1, 2, figsize=(14.0, 5.6), constrained_layout=True)
     mm = 1e3
-    axes[0].plot(r, mm * u_exact, lw=2.1, label="Аналитическое решение")
-    axes[0].plot(r, mm * u_fd, "--", lw=1.35, label="МКР, второй порядок")
+    axes[0].plot(r, mm * u_exact, lw=2.3, label="Аналитическое решение")
+    axes[0].plot(r, mm * u_fd, "--", lw=1.7, label="МКР, второй порядок")
     axes[0].axvline(diagnostics["wavefront_radius"], color="0.4", lw=1.0,
                     ls=":", label="Фронт волны")
     axes[0].set_xlim(p.cavity_radius, diagnostics["outer_radius"])
-    axes[0].set_xlabel("r, м")
-    axes[0].set_ylabel("u(r, t*), мм")
-    axes[0].set_title("Распределение перемещения")
+    axes[0].set_xlabel("r, м", fontsize=14)
+    axes[0].set_ylabel("u(r, t*), мм", fontsize=14)
+    axes[0].set_title("Распределение перемещения", fontsize=15)
     axes[0].grid(True, alpha=0.25)
-    axes[0].legend(fontsize=8, loc="upper right")
+    axes[0].legend(fontsize=10, loc="upper right")
+    axes[0].tick_params(axis="both", labelsize=11)
 
     zoom_left = max(p.cavity_radius, diagnostics["wavefront_radius"] - 8.0)
     zoom_right = diagnostics["wavefront_radius"] + 0.4
@@ -193,11 +194,12 @@ def write_outputs(output_dir: Path, p: Parameters) -> dict[str, float]:
     axes[1].plot(r[zoom], mm * u_exact[zoom], lw=2.1, label="Аналитическое решение")
     axes[1].plot(r[zoom], mm * u_fd[zoom], "--", lw=1.35, label="МКР, второй порядок")
     axes[1].axvline(diagnostics["wavefront_radius"], color="0.4", lw=1.0, ls=":")
-    axes[1].set_xlabel("r, м")
-    axes[1].set_ylabel("u(r, t*), мм")
-    axes[1].set_title("Фронт и переходная область")
+    axes[1].set_xlabel("r, м", fontsize=14)
+    axes[1].set_ylabel("u(r, t*), мм", fontsize=14)
+    axes[1].set_title("Фронт и переходная область", fontsize=15)
     axes[1].grid(True, alpha=0.25)
-    axes[1].legend(fontsize=8, loc="best")
+    axes[1].legend(fontsize=10, loc="best")
+    axes[1].tick_params(axis="both", labelsize=11)
 
     fig.savefig(output_dir / "task1_displacement.png", dpi=200)
     fig.savefig(output_dir / "task1_displacement.svg")
