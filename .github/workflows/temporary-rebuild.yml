@@ -1,0 +1,46 @@
+name: Temporary rebuild of final PDFs
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Task2.tex'
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Python dependencies
+        run: python -m pip install numpy matplotlib scipy
+      - name: Generate figures and diagnostics
+        run: |
+          mkdir -p .build/task1 .build/task2
+          python task1_wave.py --output-dir .build/task1
+          python task2_burgers.py --output-dir .build/task2
+          cp Task1.tex Task2.tex .build/
+          cp .build/task1/task1_displacement.png .build/
+          cp .build/task2/task2_burgers_profiles.png .build/
+      - name: Install XeLaTeX and required packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends texlive-xetex texlive-latex-extra texlive-fonts-recommended texlive-lang-cyrillic fonts-liberation
+      - name: Build PDFs
+        run: |
+          cd .build
+          xelatex -interaction=nonstopmode -halt-on-error Task1.tex
+          xelatex -interaction=nonstopmode -halt-on-error Task1.tex
+          xelatex -interaction=nonstopmode -halt-on-error Task2.tex
+          xelatex -interaction=nonstopmode -halt-on-error Task2.tex
+          cp Task1.pdf ../Task1.pdf
+          cp Task2.pdf ../Task2.pdf
+      - name: Publish only the final PDFs
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Task1.pdf Task2.pdf
+          git commit -m "Refine concise PDF solutions with highlighted results"
+          git push
