@@ -150,7 +150,9 @@ def write_outputs(output_dir: Path) -> dict[str, object]:
             solutions[(nu, factor)] = (x, u, diag)
 
     colors = {1.0: "#1d4ed8", 0.5: "#d97706"}
-    fig, axes = plt.subplots(3, 1, figsize=(12.5, 10.8), constrained_layout=True)
+    # The three panels are embedded at nearly this physical width in the A4
+    # report; sizing at placement scale keeps tick labels and legends legible.
+    fig, axes = plt.subplots(3, 1, figsize=(6.934, 6.222), constrained_layout=True)
     for ax, (nu, title, subtitle) in zip(axes, cases):
         for factor in (1.0, 0.5):
             x, u, _diag = solutions[(nu, factor)]
@@ -162,17 +164,17 @@ def write_outputs(output_dir: Path) -> dict[str, object]:
         ax.plot(xp, ue, "k--", lw=2.2, label="Аналитическое решение")
         ax.set_xlim(0.0, 4.0)
         ax.set_ylim(-0.18, 1.18)
-        ax.set_xlabel("x", fontsize=13)
-        ax.set_ylabel("u(x, 2)", fontsize=13)
-        ax.set_title(f"{title}, {subtitle}", fontsize=14)
+        ax.set_xlabel("x", fontsize=12)
+        ax.set_ylabel("u(x, 2)", fontsize=12)
+        ax.set_title(f"{title}, {subtitle}", fontsize=12.5)
         ax.grid(True, alpha=0.22)
-        ax.tick_params(axis="both", labelsize=11)
-        ax.legend(fontsize=10, loc="best")
+        ax.tick_params(axis="both", labelsize=10)
+        ax.legend(fontsize=9, loc="best")
     fig.savefig(output_dir / "task2_burgers_profiles.png", dpi=240)
     fig.savefig(output_dir / "task2_burgers_profiles.svg")
     plt.close(fig)
 
-    fig, axes = plt.subplots(3, 1, figsize=(12.5, 9.0), constrained_layout=True)
+    fig, axes = plt.subplots(3, 1, figsize=(6.934, 5.222), constrained_layout=True)
     for ax, (nu, _title, subtitle) in zip(axes, cases):
         for factor in (1.0, 0.5):
             x, u, _diag = solutions[(nu, factor)]
@@ -185,12 +187,12 @@ def write_outputs(output_dir: Path) -> dict[str, object]:
         ax.axvline(1.0, color="0.45", ls=":", lw=1.0)
         ax.set_xlim(0.35, 1.65)
         ax.set_ylim(-0.18, 1.18)
-        ax.set_xlabel("x", fontsize=13)
-        ax.set_ylabel("u(x, 2)", fontsize=13)
-        ax.set_title(f"Фронт: {subtitle}", fontsize=14)
+        ax.set_xlabel("x", fontsize=12)
+        ax.set_ylabel("u(x, 2)", fontsize=12)
+        ax.set_title(f"Фронт: {subtitle}", fontsize=12.5)
         ax.grid(True, alpha=0.22)
-        ax.tick_params(axis="both", labelsize=11)
-        ax.legend(fontsize=10, loc="best")
+        ax.tick_params(axis="both", labelsize=10)
+        ax.legend(fontsize=9, loc="best")
     fig.savefig(output_dir / "task2_burgers_shock.png", dpi=240)
     fig.savefig(output_dir / "task2_burgers_shock.svg")
     plt.close(fig)
