@@ -1,0 +1,123 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[a4paper,margin=20mm,headheight=15pt,headsep=8mm,footskip=10mm]{geometry}
+\usepackage{fontspec}
+\setmainfont{Liberation Serif}
+\setsansfont{Liberation Sans}
+\usepackage{polyglossia}
+\setdefaultlanguage{russian}
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{microtype}
+\usepackage{fancyhdr}
+\usepackage[most]{tcolorbox}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{caption}
+\usepackage{hyperref}
+\usepackage{needspace}
+\definecolor{navy}{HTML}{18344F}
+\definecolor{teal}{HTML}{287D82}
+\definecolor{soft}{HTML}{F2F6F8}
+\definecolor{muted}{HTML}{566575}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{2.5pt plus 0.5pt}
+\setlist{nosep,leftmargin=1.5em}
+\titleformat{\section}{\sffamily\Large\bfseries\color{navy}}{}{0pt}{}[\vspace{1pt}\color{teal}\titlerule]
+\titleformat{\subsection}{\sffamily\bfseries\color{navy}}{}{0pt}{}
+\titlespacing*{\section}{0pt}{5pt}{3pt}
+\titlespacing*{\subsection}{0pt}{5pt}{2pt}
+\pagestyle{fancy}\fancyhf{}
+\fancyhead[L]{\small\sffamily УМФ \textbullet\ Задание 2}
+\fancyhead[R]{\small\sffamily Уравнение Бюргерса}
+\fancyfoot[C]{\small\color{muted}\thepage}
+\renewcommand{\headrulewidth}{0.4pt}\renewcommand{\headrule}{\hbox to\headwidth{\color{teal}\leaders\hrule height \headrulewidth\hfill}}
+\newtcolorbox{answerbox}{enhanced,breakable,colback=soft,colframe=teal!70!black,boxrule=0.8pt,arc=1.5mm,left=3mm,right=3mm,top=2mm,bottom=2mm,title=\textsf{Ответ},fonttitle=\bfseries\color{navy}}
+\newtcolorbox{notebox}{enhanced,breakable,colback=gray!5,colframe=gray!45,boxrule=0.5pt,arc=1mm,left=2.5mm,right=2.5mm,top=1.5mm,bottom=1.5mm}
+\captionsetup{font=small,labelfont={bf,color=navy},skip=3pt}
+\hypersetup{colorlinks=true,linkcolor=navy,urlcolor=teal}
+\begin{document}
+
+\begin{center}
+{\sffamily\small\color{teal}\bfseries РАСЧЁТНАЯ РАБОТА}\par\vspace{3pt}
+{\sffamily\LARGE\bfseries\color{navy} Численное решение уравнения Бюргерса}\par\vspace{5pt}
+{\small Невязкий и вязкий случаи. Явная схема МакКормака и сравнение с аналитикой}
+\end{center}
+\vspace{2mm}
+\begin{notebox}
+\textbf{Постановка.} При $h=0.02$ требуется найти решение при $t_*=2$ для $\nu=0$, $0.02$ и $0.1$, используя схему МакКормака с коэффициентами шага $\kappa=1$ и $0.5$, а затем сравнить численные профили с аналитическими решениями.
+\end{notebox}
+
+\section{Уравнение и аналитические решения}
+
+В лекционной консервативной записи уравнение Бюргерса имеет вид
+\begin{equation}\label{eq:burgers}
+u_t+f(u)_x=\nu u_{xx},\qquad f(u)=\frac{u^2}{2}.
+\end{equation}
+При $\nu=0$ получаем невязкое уравнение закона сохранения. Начальное условие $u(x,0)=1-H(x)$ задаёт состояния $u_L=1$ слева и $u_R=0$ справа от скачка.
+
+\subsection{Невязкий случай}
+Скорость фронта следует из условия Рэнкина--Гюгонио:
+\[
+s=\frac{f(u_L)-f(u_R)}{u_L-u_R}=\frac{1/2-0}{1-0}=\frac12.
+\]
+Поэтому аналитический разрыв движется по закону $x_s(t)=t/2$. При $t_*=2$ получаем $x_s=1$ и
+\[
+u_{\mathrm{an}}(x,2)=\begin{cases}1,&x<1,\\0,&x>1.\end{cases}
+\]
+Условие $f'(u_L)=1>s=1/2>f'(u_R)=0$ подтверждает допустимость ударной волны.
+
+\subsection{Вязкий случай}
+При $\nu>0$ скачок сглаживается диффузией. Преобразование Коула--Хопфа $u=-2\nu(\ln\phi)_x$ сводит задачу к уравнению теплопроводности $\phi_t=\nu\phi_{xx}$. Для заданного начального скачка аналитическое решение можно записать через дополнительную функцию ошибок:
+\begin{equation}\label{eq:viscous}
+u_{\mathrm{an}}(x,t;\nu)=\frac{A(x,t;\nu)}{\operatorname{erfc}\!\left(-\frac{x}{2\sqrt{\nu t}}\right)+A(x,t;\nu)},\quad \nu>0,
+\end{equation}
+где
+\[
+A(x,t;\nu)=\exp\!\left(\frac{t-2x}{4\nu}\right)\operatorname{erfc}\!\left(\frac{x-t}{2\sqrt{\nu t}}\right).
+\]
+Формула \eqref{eq:viscous} использована для $\nu=0.02$ и $\nu=0.1$.
+
+\begin{notebox}
+\textbf{Уточнение области расчёта.} В условии скачок $H(x)$ расположен в $x=0$, тогда как требуется вывод на $[0,4]$. При стандартном определении $H(x)$ состояние $u=1$ находится слева от этого отрезка. Чтобы сохранить именно задачу о распространении скачка, расчёт выполнен на расширенной области $[-6,4]$ с состояниями $u(-6,t)=1$, $u(4,t)=0$; на рисунке показан требуемый интервал $[0,4]$.
+\end{notebox}
+
+\Needspace{9\baselineskip}
+\section{Схема МакКормака и шаг времени}
+
+Пусть $u_i^n\approx u(x_i,t_n)$, $f_i^n=(u_i^n)^2/2$ и $\Delta_2u_i^n=u_{i+1}^n-2u_i^n+u_{i-1}^n$. Прямой шаг-предиктор:
+\begin{equation}\label{eq:pred}
+u_i^*=u_i^n-\frac{\Delta t}{h}(f_{i+1}^n-f_i^n)+\frac{\nu\Delta t}{h^2}\Delta_2u_i^n.
+\end{equation}
+Обратный шаг-корректор усредняет исходное и предсказанное значения:
+\begin{equation}\label{eq:corr}
+u_i^{n+1}=\frac12\left[u_i^n+u_i^*-\frac{\Delta t}{h}(f_i^*-f_{i-1}^*)+\frac{\nu\Delta t}{h^2}\Delta_2u_i^*\right].
+\end{equation}
+При $\nu=0$ диффузионные слагаемые исчезают. Схема имеет второй порядок на гладких решениях, но около невязкого разрыва может давать осцилляции.
+
+Для явного расчёта учитываем одновременно перенос и диффузию:
+\[
+C_{\mathrm{adv}}=\frac{\Delta t}{h}\max_i|u_i^n|\le1,\qquad D=\frac{\nu\Delta t}{h^2}\le\frac12.
+\]
+Отсюда шаг выбирается как
+\begin{equation}\label{eq:dt}
+\Delta t=\kappa\min\!\left(\frac{h}{U_{\max}},\frac{h^2}{2\nu}\right),\quad U_{\max}=\max_i|u_i^n|,
+\end{equation}
+При $\nu=0$ остаётся первое ограничение. Для $h=0.02$ начальные пределы $\Delta t$ равны $0.02$, $0.01$ и $0.002$ с при $\nu=0$, $0.02$ и $0.1$ соответственно; далее шаг адаптируется по $U_{\max}$ и при необходимости укорачивается до $t=2$.
+
+\section{Результаты расчёта}
+
+\begin{center}
+\includegraphics[width=0.92\textwidth]{task2_burgers_profiles.png}
+\captionof{figure}{Профили $u(x,2)$ на требуемом интервале $[0,4]$: два расчёта МакКормака и аналитическое решение.}
+\end{center}
+
+При $\nu=0$ получено 100 шагов при $\kappa=1$ ($E_1=4.87\cdot10^{-3}$) и 224 при $\kappa=0.5$ ($E_1=1.10\cdot10^{-2}$); после численного выброса шаг уменьшался, у фронта заметны осцилляции.
+
+При $\nu=0.02$ выполнено 200/400 шагов, $E_1\approx1.00\cdot10^{-2}$, максимальная ошибка $\approx6.5\cdot10^{-2}$. При $\nu=0.1$ выполнено 1000/2001 шагов, $E_1\approx9.97\cdot10^{-3}$, максимальная ошибка $\approx1.4\cdot10^{-2}$. Большая вязкость расширяет фронт и уменьшает максимальную ошибку.
+
+\begin{answerbox}
+\textbf{Итог при $t=2$.} В невязком случае ударный фронт находится в $x=1$ и сохраняет разрыв; при $\nu=0.02$ и $\nu=0.1$ он сглаживается, причём большая вязкость даёт более широкий переход. Схема МакКормака воспроизводит положение фронта и общий профиль. Для невязкого скачка сохраняются осцилляции, а уменьшение временного шага само по себе не гарантирует уменьшения ошибки при фиксированном $h$.
+\end{answerbox}
+
+\end{document}
