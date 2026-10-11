@@ -18,6 +18,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.special import erfc
 
+plt.rcParams.update({"font.family": "Times New Roman", "mathtext.fontset": "stix"})
+
 
 def flux(u: np.ndarray) -> np.ndarray:
     return 0.5 * u * u
@@ -42,11 +44,9 @@ def analytic_viscous(x: np.ndarray, t: float, nu: float) -> np.ndarray:
 
 
 def stability_step(h: float, nu: float, u_max: float, factor: float) -> float:
-    """Conservative explicit bound for advection and diffusion stability."""
+    """Lecture stability bound for explicit advection and diffusion."""
     u_max = max(float(u_max), 1e-12)
-    advective = h / u_max
-    diffusive = math.inf if nu == 0.0 else h * h / (2.0 * nu)
-    return factor * min(advective, diffusive)
+    return factor / (u_max / h + 2.0 * nu / h**2)
 
 
 def solve_maccormack(nu: float, factor: float, *, h: float = 0.02,
@@ -64,16 +64,22 @@ def solve_maccormack(nu: float, factor: float, *, h: float = 0.02,
     n_steps = 0
     max_courant = 0.0
     max_diffusion_number = 0.0
+    max_combined_stability_number = 0.0
     max_abs_u = float(np.max(np.abs(u)))
     min_u = float(np.min(u))
+    time_tolerance = 1e-12 * max(1.0, t_final)
 
-    while t < t_final - 5e-14:
-        dt = min(stability_step(h, nu, float(np.max(np.abs(u))), factor),
-                 t_final - t)
-        courant = float(np.max(np.abs(u))) * dt / h
+    while t_final - t > time_tolerance:
+        u_max_now = float(np.max(np.abs(u)))
+        remaining = t_final - t
+        dt = min(stability_step(h, nu, u_max_now, factor), remaining)
+        courant = u_max_now * dt / h
         diffusion_number = nu * dt / h**2
         max_courant = max(max_courant, courant)
         max_diffusion_number = max(max_diffusion_number, diffusion_number)
+        max_combined_stability_number = max(
+            max_combined_stability_number, courant + 2.0 * diffusion_number
+        )
         d = nu * dt / h**2
 
         # Predictor: forward difference for the conservative flux.
@@ -98,7 +104,8 @@ def solve_maccormack(nu: float, factor: float, *, h: float = 0.02,
                 f"Non-finite solution at t={t:g}, nu={nu}, factor={factor}"
             )
         u = u_next
-        t += dt
+        t_next = t + dt
+        t = t_final if t_final - t_next <= time_tolerance else t_next
         n_steps += 1
         max_abs_u = max(max_abs_u, float(np.max(np.abs(u))))
         min_u = min(min_u, float(np.min(u)))
@@ -113,6 +120,7 @@ def solve_maccormack(nu: float, factor: float, *, h: float = 0.02,
         "steps": float(n_steps),
         "max_observed_advective_courant": max_courant,
         "max_diffusion_number": max_diffusion_number,
+        "max_combined_stability_number": max_combined_stability_number,
         "max_abs_u": max_abs_u,
         "min_u": min_u,
     }
@@ -142,46 +150,48 @@ def write_outputs(output_dir: Path) -> dict[str, object]:
             solutions[(nu, factor)] = (x, u, diag)
 
     colors = {1.0: "#1d4ed8", 0.5: "#d97706"}
-    fig, axes = plt.subplots(1, 3, figsize=(15.2, 4.8), constrained_layout=True)
+    fig, axes = plt.subplots(3, 1, figsize=(12.5, 10.8), constrained_layout=True)
     for ax, (nu, title, subtitle) in zip(axes, cases):
         for factor in (1.0, 0.5):
             x, u, _diag = solutions[(nu, factor)]
             mask = (x >= 0.0) & (x <= 4.0 + 1e-12)
-            ax.plot(x[mask], u[mask], color=colors[factor], lw=1.5,
+            ax.plot(x[mask], u[mask], color=colors[factor], lw=1.9,
                     label=f"МакКормак, κ={factor:g}")
         xp = np.linspace(0.0, 4.0, 1201)
         ue = analytic_inviscid(xp, t_final) if nu == 0 else analytic_viscous(xp, t_final, nu)
-        ax.plot(xp, ue, "k--", lw=1.9, label="Аналитическое решение")
+        ax.plot(xp, ue, "k--", lw=2.2, label="Аналитическое решение")
         ax.set_xlim(0.0, 4.0)
         ax.set_ylim(-0.18, 1.18)
-        ax.set_xlabel("x")
-        ax.set_ylabel("u(x, 2)")
-        ax.set_title(f"{title}\n{subtitle}")
+        ax.set_xlabel("x", fontsize=13)
+        ax.set_ylabel("u(x, 2)", fontsize=13)
+        ax.set_title(f"{title}, {subtitle}", fontsize=14)
         ax.grid(True, alpha=0.22)
-        ax.legend(fontsize=8, loc="best")
-    fig.savefig(output_dir / "task2_burgers_profiles.png", dpi=220)
+        ax.tick_params(axis="both", labelsize=11)
+        ax.legend(fontsize=10, loc="best")
+    fig.savefig(output_dir / "task2_burgers_profiles.png", dpi=240)
     fig.savefig(output_dir / "task2_burgers_profiles.svg")
     plt.close(fig)
 
-    fig, axes = plt.subplots(1, 3, figsize=(15.2, 4.8), constrained_layout=True)
+    fig, axes = plt.subplots(3, 1, figsize=(12.5, 9.0), constrained_layout=True)
     for ax, (nu, _title, subtitle) in zip(axes, cases):
         for factor in (1.0, 0.5):
             x, u, _diag = solutions[(nu, factor)]
             mask = (x >= 0.35) & (x <= 1.65)
-            ax.plot(x[mask], u[mask], color=colors[factor], lw=1.5,
+            ax.plot(x[mask], u[mask], color=colors[factor], lw=1.9,
                     label=f"МакКормак, κ={factor:g}")
         xp = np.linspace(0.35, 1.65, 1001)
         ue = analytic_inviscid(xp, t_final) if nu == 0 else analytic_viscous(xp, t_final, nu)
-        ax.plot(xp, ue, "k--", lw=1.9, label="Аналитическое решение")
+        ax.plot(xp, ue, "k--", lw=2.2, label="Аналитическое решение")
         ax.axvline(1.0, color="0.45", ls=":", lw=1.0)
         ax.set_xlim(0.35, 1.65)
         ax.set_ylim(-0.18, 1.18)
-        ax.set_xlabel("x")
-        ax.set_ylabel("u(x, 2)")
-        ax.set_title(f"Фронт: {subtitle}")
+        ax.set_xlabel("x", fontsize=13)
+        ax.set_ylabel("u(x, 2)", fontsize=13)
+        ax.set_title(f"Фронт: {subtitle}", fontsize=14)
         ax.grid(True, alpha=0.22)
-        ax.legend(fontsize=8, loc="best")
-    fig.savefig(output_dir / "task2_burgers_shock.png", dpi=220)
+        ax.tick_params(axis="both", labelsize=11)
+        ax.legend(fontsize=10, loc="best")
+    fig.savefig(output_dir / "task2_burgers_shock.png", dpi=240)
     fig.savefig(output_dir / "task2_burgers_shock.svg")
     plt.close(fig)
 

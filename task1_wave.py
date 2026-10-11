@@ -21,6 +21,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
 
+plt.rcParams.update({"font.family": "Times New Roman", "mathtext.fontset": "stix"})
+
 FloatArray = npt.NDArray[np.float64]
 
 
@@ -168,41 +170,56 @@ def write_outputs(output_dir: Path, p: Parameters) -> dict[str, float]:
     diagnostics["relative_max_error"] = rel_error
     diagnostics["max_exact_displacement_m"] = max_exact
 
+    for level, h_over_R in enumerate((p.h_over_R / 2.0, p.h_over_R / 4.0), start=1):
+        refined_p = p._replace(h_over_R=h_over_R)
+        refined_r, refined_u, refined_diag = solve_finite_differences(refined_p)
+        refined_exact = analytic_displacement(refined_r, p.final_time, refined_p, c)
+        refined_mask = refined_r <= refined_diag["wavefront_radius"] + 1e-12
+        refined_max_error = float(np.max(np.abs(refined_u[refined_mask] - refined_exact[refined_mask])))
+        refined_scale = float(np.max(np.abs(refined_exact[refined_mask])))
+        diagnostics[f"refinement_{level}_h_m"] = h_over_R * p.cavity_radius
+        diagnostics[f"refinement_{level}_max_abs_error_m"] = refined_max_error
+        diagnostics[f"refinement_{level}_relative_error"] = refined_max_error / refined_scale
+
     csv_path = output_dir / "task1_profile_t001.csv"
     with csv_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(["r_m", "u_finite_difference_m", "u_analytic_m", "abs_error_m"])
         writer.writerows(zip(r, u_fd, u_exact, absolute_error))
 
-    fig, axes = plt.subplots(1, 2, figsize=(14.0, 5.6), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=(12.4, 5.2), constrained_layout=True)
     mm = 1e3
-    axes[0].plot(r, mm * u_exact, lw=2.3, label="Аналитическое решение")
-    axes[0].plot(r, mm * u_fd, "--", lw=1.7, label="МКР, второй порядок")
-    axes[0].axvline(diagnostics["wavefront_radius"], color="0.4", lw=1.0,
-                    ls=":", label="Фронт волны")
-    axes[0].set_xlim(p.cavity_radius, diagnostics["outer_radius"])
-    axes[0].set_xlabel("r, м", fontsize=14)
-    axes[0].set_ylabel("u(r, t*), мм", fontsize=14)
-    axes[0].set_title("Распределение перемещения", fontsize=15)
-    axes[0].grid(True, alpha=0.25)
-    axes[0].legend(fontsize=10, loc="upper right")
-    axes[0].tick_params(axis="both", labelsize=11)
+    ax.plot(r, mm * u_exact, lw=2.5, label="Аналитическое решение")
+    ax.plot(r, mm * u_fd, "--", lw=1.9, label="МКР, второй порядок")
+    ax.axvline(diagnostics["wavefront_radius"], color="0.4", lw=1.2,
+               ls=":", label="Фронт волны")
+    ax.set_xlim(p.cavity_radius, diagnostics["outer_radius"])
+    ax.set_xlabel("r, м", fontsize=14)
+    ax.set_ylabel("u(r, t*), мм", fontsize=14)
+    ax.set_title("Распределение перемещения", fontsize=15)
+    ax.grid(True, alpha=0.25)
+    ax.legend(fontsize=11, loc="upper right")
+    ax.tick_params(axis="both", labelsize=12)
+    fig.savefig(output_dir / "task1_displacement.png", dpi=240)
+    fig.savefig(output_dir / "task1_displacement.svg")
+    plt.close(fig)
 
     zoom_left = max(p.cavity_radius, diagnostics["wavefront_radius"] - 8.0)
     zoom_right = diagnostics["wavefront_radius"] + 0.4
     zoom = (r >= zoom_left) & (r <= zoom_right)
-    axes[1].plot(r[zoom], mm * u_exact[zoom], lw=2.1, label="Аналитическое решение")
-    axes[1].plot(r[zoom], mm * u_fd[zoom], "--", lw=1.35, label="МКР, второй порядок")
-    axes[1].axvline(diagnostics["wavefront_radius"], color="0.4", lw=1.0, ls=":")
-    axes[1].set_xlabel("r, м", fontsize=14)
-    axes[1].set_ylabel("u(r, t*), мм", fontsize=14)
-    axes[1].set_title("Фронт и переходная область", fontsize=15)
-    axes[1].grid(True, alpha=0.25)
-    axes[1].legend(fontsize=10, loc="best")
-    axes[1].tick_params(axis="both", labelsize=11)
-
-    fig.savefig(output_dir / "task1_displacement.png", dpi=200)
-    fig.savefig(output_dir / "task1_displacement.svg")
+    fig, ax = plt.subplots(figsize=(12.4, 5.2), constrained_layout=True)
+    ax.plot(r[zoom], mm * u_exact[zoom], lw=2.5, label="Аналитическое решение")
+    ax.plot(r[zoom], mm * u_fd[zoom], "--", lw=1.9, label="МКР, второй порядок")
+    ax.axvline(diagnostics["wavefront_radius"], color="0.4", lw=1.2, ls=":")
+    ax.set_xlim(zoom_left, zoom_right)
+    ax.set_xlabel("r, м", fontsize=14)
+    ax.set_ylabel("u(r, t*), мм", fontsize=14)
+    ax.set_title("Фронт и переходная область", fontsize=15)
+    ax.grid(True, alpha=0.25)
+    ax.legend(fontsize=11, loc="best")
+    ax.tick_params(axis="both", labelsize=12)
+    fig.savefig(output_dir / "task1_front.png", dpi=240)
+    fig.savefig(output_dir / "task1_front.svg")
     plt.close(fig)
 
     report_path = output_dir / "task1_diagnostics.txt"
