@@ -164,11 +164,12 @@ def make_figures(x, y, U, V, output_dir):
         fig, ax = plt.subplots(figsize=(6.934, 3.20), constrained_layout=True)
         for ys, (color, style) in zip(slices, styles):
             j = int(np.argmin(np.abs(y - ys)))
-            ax.plot(x, field[j], color=color, ls=style, lw=1.9, label=f"y={ys:g}")
+            ax.plot(x, field[j], color=color, ls=style, lw=1.9, label=f"y={ys:g}".replace(".", ","))
         ax.set(xlim=(0, 2), xlabel="x", ylabel=component,
                title=f"{component}(x, y) на горизонтальных сечениях")
         ax.grid(True, alpha=0.22)
-        ax.legend(fontsize=11)
+        ax.title.set_fontsize(12.5)
+        ax.legend(fontsize=10.5)
         ax.tick_params(labelsize=11)
         ax.xaxis.label.set_size(12)
         ax.yaxis.label.set_size(12)

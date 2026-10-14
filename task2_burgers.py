@@ -35,7 +35,7 @@ def analytic_viscous(x: np.ndarray, t: float, nu: float) -> np.ndarray:
     if nu <= 0.0:
         raise ValueError("nu must be positive for the viscous exact solution")
     if t <= 0.0:
-        return np.where(x < 0.0, 1.0, 0.0)
+        return np.where(x < 0.0, 1.0, np.where(x == 0.0, 0.5, 0.0))
     q = 2.0 * math.sqrt(nu * t)
     term_right = erfc(-x / q)
     exponent = (t - 2.0 * x) / (4.0 * nu)
@@ -138,7 +138,8 @@ def solve_maccormack(nu: float, factor: float, *, h: float = 0.02,
     if nu == 0.0:
         shock_node = np.isclose(xr, 0.5 * t_final, rtol=0.0, atol=1e-12)
         linf_errors = err[~shock_node]
-        diagnostics["linf_error_at_shock_node_by_right_trace"] = float(np.max(err[shock_node]))
+        if np.any(shock_node):
+            diagnostics["linf_error_at_shock_node_by_right_trace"] = float(np.max(err[shock_node]))
     else:
         linf_errors = err
     diagnostics["linf_error_requested_interval"] = float(np.max(linf_errors))
@@ -161,27 +162,47 @@ def write_outputs(output_dir: Path) -> dict[str, object]:
             diagnostics.append(diag)
             solutions[(nu, factor)] = (x, u, diag)
 
-    colors = {1.0: "#1d4ed8", 0.5: "#d97706"}
+    colors = {1.0: "#1c4f85", 0.5: "#ba4b20"}
     # The three panels are embedded at nearly this physical width in the A4
     # report; sizing at placement scale keeps tick labels and legends legible.
-    fig, axes = plt.subplots(3, 1, figsize=(6.934, 6.222), constrained_layout=True)
+    fig, axes = plt.subplots(3, 1, figsize=(6.934, 7.20), constrained_layout=True)
     for ax, (nu, title, subtitle) in zip(axes, cases):
         for factor in (1.0, 0.5):
             x, u, _diag = solutions[(nu, factor)]
             mask = (x >= 0.0) & (x <= 4.0 + 1e-12)
-            ax.plot(x[mask], u[mask], color=colors[factor], lw=1.9,
-                    label=f"МакКормак, κ={factor:g}")
+            ax.plot(x[mask], u[mask], color=colors[factor], lw=1.7,
+                    ls="-" if factor == 1.0 else "-.",
+                    label="Мак-Кормак, κ=" + ("1" if factor == 1.0 else "0,5"))
         xp = np.linspace(0.0, 4.0, 1201)
         ue = analytic_inviscid(xp, t_final) if nu == 0 else analytic_viscous(xp, t_final, nu)
-        ax.plot(xp, ue, "k--", lw=2.2, label="Аналитическое решение")
+        if nu == 0.0:
+            ax.plot([0.0, 1.0, 1.0, 4.0], [1.0, 1.0, 0.0, 0.0],
+                    color="#333333", ls="--", lw=1.25, label="Точное решение")
+        else:
+            ax.plot(xp, ue, color="#333333", ls="--", lw=1.25, label="Точное решение")
         ax.set_xlim(0.0, 4.0)
         ax.set_ylim(-0.18, 1.18)
         ax.set_xlabel("x", fontsize=12)
         ax.set_ylabel("u(x, 2)", fontsize=12)
         ax.set_title(f"{title}, {subtitle}", fontsize=12.5)
         ax.grid(True, alpha=0.22)
-        ax.tick_params(axis="both", labelsize=10)
-        ax.legend(fontsize=9, loc="best")
+        ax.tick_params(axis="both", labelsize=11)
+        ax.legend(fontsize=10.5, loc="best")
+        if nu == 0.0:
+            inset = ax.inset_axes([0.61, 0.10, 0.35, 0.36])
+            for factor in (1.0, 0.5):
+                x, u, _diag = solutions[(nu, factor)]
+                zoom = (x >= 0.72) & (x <= 1.20)
+                inset.plot(x[zoom], u[zoom], color=colors[factor], lw=1.3,
+                           ls="-" if factor == 1.0 else "-.")
+            inset.plot([0.72, 1.0, 1.0, 1.20], [1.0, 1.0, 0.0, 0.0],
+                       color="#333333", ls="--", lw=1.0)
+            inset.set_xlim(0.72, 1.20)
+            inset.set_ylim(-0.12, 1.18)
+            inset.set_xticks([0.8, 1.0, 1.2])
+            inset.set_yticks([0.0, 1.0])
+            inset.tick_params(labelsize=9)
+            inset.grid(True, alpha=0.22)
     fig.savefig(output_dir / "task2_burgers_profiles.png", dpi=240)
     fig.savefig(output_dir / "task2_burgers_profiles.svg")
     plt.close(fig)
@@ -191,11 +212,16 @@ def write_outputs(output_dir: Path) -> dict[str, object]:
         for factor in (1.0, 0.5):
             x, u, _diag = solutions[(nu, factor)]
             mask = (x >= 0.35) & (x <= 1.65)
-            ax.plot(x[mask], u[mask], color=colors[factor], lw=1.9,
-                    label=f"МакКормак, κ={factor:g}")
+            ax.plot(x[mask], u[mask], color=colors[factor], lw=1.7,
+                    ls="-" if factor == 1.0 else "-.",
+                    label="Мак-Кормак, κ=" + ("1" if factor == 1.0 else "0,5"))
         xp = np.linspace(0.35, 1.65, 1001)
         ue = analytic_inviscid(xp, t_final) if nu == 0 else analytic_viscous(xp, t_final, nu)
-        ax.plot(xp, ue, "k--", lw=2.2, label="Аналитическое решение")
+        if nu == 0.0:
+            ax.plot([0.35, 1.0, 1.0, 1.65], [1.0, 1.0, 0.0, 0.0],
+                    color="#333333", ls="--", lw=1.25, label="Точное решение")
+        else:
+            ax.plot(xp, ue, color="#333333", ls="--", lw=1.25, label="Точное решение")
         ax.axvline(1.0, color="0.45", ls=":", lw=1.0)
         ax.set_xlim(0.35, 1.65)
         ax.set_ylim(-0.18, 1.18)
@@ -203,8 +229,8 @@ def write_outputs(output_dir: Path) -> dict[str, object]:
         ax.set_ylabel("u(x, 2)", fontsize=12)
         ax.set_title(f"Фронт: {subtitle}", fontsize=12.5)
         ax.grid(True, alpha=0.22)
-        ax.tick_params(axis="both", labelsize=10)
-        ax.legend(fontsize=9, loc="best")
+        ax.tick_params(axis="both", labelsize=11)
+        ax.legend(fontsize=10.5, loc="best")
     fig.savefig(output_dir / "task2_burgers_shock.png", dpi=240)
     fig.savefig(output_dir / "task2_burgers_shock.svg")
     plt.close(fig)
