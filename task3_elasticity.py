@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Finite-difference solution of the plane-strain rectangle in Task 3."""
+"""Conservative finite differences for the lecture's plane-strain Task 3.
+
+The unknowns U,V are nodal displacements on the assigned rectangular mesh.
+Interior equations are the centered Navier differences from the lecture.
+Boundary equations follow the discrete virtual-work balance, including both
+faces at each corner. Forces/moments and recovered stresses are checked
+separately: an algebraic residual is not a pointwise stress accuracy estimate.
+"""
 from __future__ import annotations
 
 import argparse
@@ -11,253 +18,193 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.sparse import coo_matrix
+from scipy.sparse import bmat, diags, kron
 from scipy.sparse.linalg import spsolve
 
 plt.rcParams.update({"font.family": "Times New Roman", "mathtext.fontset": "stix"})
 
 
-def solve(width: float = 2.0, height: float = 1.0, h: float = 0.025,
-          nu: float = 0.3, epsilon: float = 1.0e-5):
-    nx, ny = round(width / h), round(height / h)
-    if abs(nx * h - width) > 1e-12 or abs(ny * h - height) > 1e-12:
-        raise ValueError("The step must divide both side lengths.")
-    x = np.linspace(0.0, width, nx + 1)
-    y = np.linspace(0.0, height, ny + 1)
+def difference_operators(n: int, h: float):
+    """Trapezoidal H, SBP first difference D, narrow Neumann stiffness L."""
+    weights = np.full(n + 1, h)
+    weights[[0, -1]] = h / 2.0
+    H = diags(weights, format="csr")
+    D = diags([-np.ones(n), np.ones(n)], [-1, 1],
+              shape=(n + 1, n + 1), format="lil") / (2.0 * h)
+    D[0, 0], D[0, 1] = -1.0 / h, 1.0 / h
+    D[n, n - 1], D[n, n] = -1.0 / h, 1.0 / h
+    L = diags([-np.ones(n), np.r_[1.0, np.full(n - 1, 2.0), 1.0],
+               -np.ones(n)], [-1, 0, 1], format="csr") / h
+    return H, D.tocsr(), L
 
-    # Plane-strain Lamé ratios; stress is scaled by lambda + 2 mu.
-    lam_over_mu = 2.0 * nu / (1.0 - 2.0 * nu)
-    A = 1.0 / (lam_over_mu + 2.0)
-    C = lam_over_mu / (lam_over_mu + 2.0)
+
+def assemble(h: float = 0.025, nu: float = 0.3):
+    nx, ny = round(2.0 / h), round(1.0 / h)
+    if nx < 2 or ny < 2 or abs(nx * h - 2.0) > 1e-12 or abs(ny * h - 1.0) > 1e-12:
+        raise ValueError("h must divide both side lengths and give at least two cells.")
+    if not (-1.0 < nu < 0.5):
+        raise ValueError("Plane-strain Poisson ratio must lie in (-1,0.5).")
+    x, y = np.linspace(0.0, 2.0, nx + 1), np.linspace(0.0, 1.0, ny + 1)
+    A = (1.0 - 2.0 * nu) / (2.0 * (1.0 - nu))
+    C = nu / (1.0 - nu)
     B = A + C
-    ndof = 2 * (nx + 1) * (ny + 1)
+    Hx, Dx, Lx = difference_operators(nx, h)
+    Hy, Dy, Ly = difference_operators(ny, h)
+    Ix, Iy = diags(np.ones(nx + 1)), diags(np.ones(ny + 1))
+    H = kron(Hy, Hx, format="csr")
+    D_X, D_Y = kron(Iy, Dx, format="csr"), kron(Dy, Ix, format="csr")
+    K_uu = kron(Hy, Lx) + A * kron(Ly, Hx)
+    K_vv = A * kron(Hy, Lx) + kron(Ly, Hx)
+    K_uv = C * (D_X.T @ H @ D_Y) + A * (D_Y.T @ H @ D_X)
+    K = bmat([[K_uu, K_uv], [K_uv.T, K_vv]], format="csr")
 
-    def dof(i: int, j: int, component: int) -> int:
-        return 2 * (j * (nx + 1) + i) + component
-
-    rows: list[int] = []
-    cols: list[int] = []
-    values: list[float] = []
-    rhs: list[float] = []
-
-    def equation(terms: dict[int, float], value: float = 0.0) -> None:
-        r = len(rhs)
-        for col, coefficient in terms.items():
-            if coefficient:
-                rows.append(r)
-                cols.append(col)
-                values.append(coefficient)
-        rhs.append(value)
-
-    def add(terms: dict[int, float], i: int, j: int, component: int,
-            coefficient: float) -> None:
-        col = dof(i, j, component)
-        terms[col] = terms.get(col, 0.0) + coefficient
-
-    for j in range(ny + 1):
-        for component in (0, 1):
-            equation({dof(0, j, component): 1.0})
-
-    for j in range(1, ny):
-        for i in range(1, nx):
-            # Interior Navier equations, multiplied by h_x^2 for scaling.
-            ueq: dict[int, float] = {}
-            for ii, c in ((i + 1, 1.0), (i, -2.0), (i - 1, 1.0)):
-                add(ueq, ii, j, 0, c)
-            for jj, c in ((j + 1, A), (j, -2.0 * A), (j - 1, A)):
-                add(ueq, i, jj, 0, c)
-            cross = B / 4.0
-            for ii, jj, c in ((i+1,j+1,1),(i+1,j-1,-1),(i-1,j+1,-1),(i-1,j-1,1)):
-                add(ueq, ii, jj, 1, cross * c)
-            equation(ueq)
-
-            veq: dict[int, float] = {}
-            for jj, c in ((j + 1, 1.0), (j, -2.0), (j - 1, 1.0)):
-                add(veq, i, jj, 1, c)
-            for ii, c in ((i + 1, A), (i, -2.0 * A), (i - 1, A)):
-                add(veq, ii, j, 1, c)
-            for ii, jj, c in ((i+1,j+1,1),(i+1,j-1,-1),(i-1,j+1,-1),(i-1,j-1,1)):
-                add(veq, ii, jj, 0, cross * c)
-            equation(veq)
-
-    # Traction-free lower and upper edges. The normal derivative is second-order
-    # one-sided and the tangential derivative is centered.
-    for i in range(1, nx):
-        for normal_stencil in (((0, -1.5), (1, 2.0), (2, -0.5)),
-                               ((ny, 1.5), (ny - 1, -2.0), (ny - 2, 0.5))):
-            boundary_j = normal_stencil[0][0]
-            txy: dict[int, float] = {}
-            for j, coefficient in normal_stencil:
-                add(txy, i, j, 0, A * coefficient)
-            add(txy, i + 1, boundary_j, 1, A * h / (2.0 * h))
-            add(txy, i - 1, boundary_j, 1, -A * h / (2.0 * h))
-            equation(txy)
-
-            tyy: dict[int, float] = {}
-            for j, coefficient in normal_stencil:
-                add(tyy, i, j, 1, coefficient)
-            add(tyy, i + 1, boundary_j, 0, C * h / (2.0 * h))
-            add(tyy, i - 1, boundary_j, 0, -C * h / (2.0 * h))
-            equation(tyy)
-
-    # Applied tractions on x = width; tau(y) = y(1-y).
-    for j in range(1, ny):
-        normal: dict[int, float] = {}
-        for i, coefficient in ((nx, 1.5), (nx - 1, -2.0), (nx - 2, 0.5)):
-            add(normal, i, j, 0, coefficient)
-        add(normal, nx, j + 1, 1, C * h / (2.0 * h))
-        add(normal, nx, j - 1, 1, -C * h / (2.0 * h))
-        equation(normal)
-
-        shear: dict[int, float] = {}
-        add(shear, nx, j + 1, 0, A * h / (2.0 * h))
-        add(shear, nx, j - 1, 0, -A * h / (2.0 * h))
-        for i, coefficient in ((nx, 1.5), (nx - 1, -2.0), (nx - 2, 0.5)):
-            add(shear, i, j, 1, A * coefficient)
-        equation(shear, h * y[j] * (1.0 - y[j]))
-
-    # At each right corner use the two conditions from the loaded edge.
-    for normal_stencil in (((0, -1.5), (1, 2.0), (2, -0.5)),
-                           ((ny, 1.5), (ny - 1, -2.0), (ny - 2, 0.5))):
-        normal: dict[int, float] = {}
-        for i, coefficient in ((nx, 1.5), (nx - 1, -2.0), (nx - 2, 0.5)):
-            add(normal, i, normal_stencil[0][0], 0, coefficient)
-        for j, coefficient in normal_stencil:
-            add(normal, nx, j, 1, C * coefficient)
-        equation(normal)
-
-        shear: dict[int, float] = {}
-        for j, coefficient in normal_stencil:
-            add(shear, nx, j, 0, A * coefficient)
-        for i, coefficient in ((nx, 1.5), (nx - 1, -2.0), (nx - 2, 0.5)):
-            add(shear, i, normal_stencil[0][0], 1, A * coefficient)
-        equation(shear, h * y[normal_stencil[0][0]] * (1.0 - y[normal_stencil[0][0]]))
-
-    matrix = coo_matrix((values, (rows, cols)), shape=(ndof, ndof)).tocsr()
-    rhs_array = np.asarray(rhs)
-    solution = spsolve(matrix, rhs_array)
-    residual = matrix @ solution - rhs_array
-    residual_inf = float(np.linalg.norm(residual, ord=np.inf))
-    if residual_inf >= epsilon:
-        raise RuntimeError(f"Scaled linear-system residual {residual_inf:.3e} exceeds epsilon={epsilon:.1e}.")
-
-    U = solution[0::2].reshape(ny + 1, nx + 1)
-    V = solution[1::2].reshape(ny + 1, nx + 1)
-    return x, y, U, V, {"A": A, "B": B, "C": C, "residual_inf": residual_inf,
-                        "nx": nx, "ny": ny, "lambda_over_mu": lam_over_mu}
+    # Integral of q(y)=y(1-y) times the linear boundary nodal hats.
+    # These loads include both right endpoints and sum to exactly 1/6.
+    boundary_load = h * y * (1.0 - y) - h**3 / 6.0
+    boundary_load[[0, -1]] = h**2 * (2.0 - h) / 12.0
+    nodes = (nx + 1) * (ny + 1)
+    f = np.zeros(2 * nodes)
+    right = nx + np.arange(ny + 1) * (nx + 1)
+    f[nodes + right] = boundary_load
+    left = np.arange(ny + 1) * (nx + 1)
+    fixed = np.r_[left, nodes + left]
+    free = np.setdiff1d(np.arange(2 * nodes), fixed)
+    return x, y, K, f, fixed, free, {"A": A, "B": B, "C": C, "H": H,
+                                    "nx": nx, "ny": ny, "left": left}
 
 
-def make_figure(x: np.ndarray, y: np.ndarray, U: np.ndarray, V: np.ndarray,
-                output: Path) -> None:
-    X, Y = np.meshgrid(x, y)
+def recovered_stresses(U, V, h, A, C):
+    """Independent nodal recovery, second-order one-sided on the boundary."""
+    uy, ux = np.gradient(U, h, h, edge_order=2)
+    vy, vx = np.gradient(V, h, h, edge_order=2)
+    return ux + C * vy, vy + C * ux, A * (uy + vx)
+
+
+def solve(h: float = 0.025, nu: float = 0.3, epsilon: float = 1e-5):
+    x, y, K, f, fixed, free, op = assemble(h, nu)
+    z = np.zeros(len(f))
+    z[free] = spsolve(K[free, :][:, free], f[free])
+    residual = K @ z - f
+    n = len(f) // 2
+    U, V = z[:n].reshape(len(y), len(x)), z[n:].reshape(len(y), len(x))
+    Hdiag = np.tile(op["H"].diagonal(), 2)
+    force_residual = float(np.max(np.abs(residual[free])))
+    density_residual = float(np.max(np.abs(residual[free] / Hdiag[free])))
+    if not np.isfinite(z).all() or density_residual > epsilon:
+        raise RuntimeError(f"Nodal equilibrium residual {density_residual:g} exceeds {epsilon:g}.")
+    left = op["left"]
+    rx, ry = residual[left], residual[n + left]
+    force_x, force_y = float(rx.sum()), float(ry.sum())
+    moment = float(-np.dot(y, rx))
     magnitude = np.hypot(U, V)
-    scale = 1.0
-    fig, ax = plt.subplots(2, 2, figsize=(7.6, 8.2), constrained_layout=True)
-    fields = ((U, "Перемещение u", "u"), (V, "Перемещение v", "v"),
-              (magnitude, "Модуль перемещения", "|u|"))
-    for axis, (field, title, label) in zip(ax.flat, fields):
-        contour = axis.contourf(X, Y, field, levels=22, cmap="viridis")
-        axis.set(title=title, xlabel="x", ylabel="y", aspect="equal")
-        fig.colorbar(contour, ax=axis, label=label, shrink=0.82)
+    jmax, imax = np.unravel_index(np.argmax(magnitude), magnitude.shape)
+    sigxx, sigyy, sigxy = recovered_stresses(U, V, h, op["A"], op["C"])
+    independent_ry = -float(np.trapezoid(sigxy[:, 0], y))
 
-    axis = ax.flat[3]
-    step = 4
-    for j in range(0, len(y), step):
-        axis.plot(X[j, ::step] + scale * U[j, ::step],
-                  Y[j, ::step] + scale * V[j, ::step], color="#245b9e", lw=0.85)
-    for i in range(0, len(x), step):
-        axis.plot(X[::step, i] + scale * U[::step, i],
-                  Y[::step, i] + scale * V[::step, i], color="#245b9e", lw=0.85)
-    axis.set(title="Деформированная сетка (масштаб решения)", xlabel="x", ylabel="y", aspect="equal")
-    fig.savefig(output, dpi=240, bbox_inches="tight")
-    fig.savefig(output.with_suffix(".svg"), bbox_inches="tight")
-    plt.close(fig)
-
-
-def check_discrete_equations(x: np.ndarray, y: np.ndarray, U: np.ndarray,
-                             V: np.ndarray, A: float, B: float,
-                             C: float) -> dict[str, float]:
-    hx, hy = x[1] - x[0], y[1] - y[0]
-    u_xx = (U[1:-1, 2:] - 2.0 * U[1:-1, 1:-1] + U[1:-1, :-2]) / hx**2
-    u_yy = (U[2:, 1:-1] - 2.0 * U[1:-1, 1:-1] + U[:-2, 1:-1]) / hy**2
-    v_xy = (V[2:, 2:] - V[2:, :-2] - V[:-2, 2:] + V[:-2, :-2]) / (4.0 * hx * hy)
-    v_xx = (V[1:-1, 2:] - 2.0 * V[1:-1, 1:-1] + V[1:-1, :-2]) / hx**2
-    v_yy = (V[2:, 1:-1] - 2.0 * V[1:-1, 1:-1] + V[:-2, 1:-1]) / hy**2
-    u_xy = (U[2:, 2:] - U[2:, :-2] - U[:-2, 2:] + U[:-2, :-2]) / (4.0 * hx * hy)
-    pde_x = u_xx + A * u_yy + B * v_xy
-    pde_y = v_yy + A * v_xx + B * u_xy
-
-    edge_residuals = []
-    for stencil in (((0, -1.5), (1, 2.0), (2, -0.5)),
-                    ((len(y)-1, 1.5), (len(y)-2, -2.0), (len(y)-3, 0.5))):
-        uy = sum(coefficient * U[j, 1:-1] for j, coefficient in stencil) / hy
-        vy = sum(coefficient * V[j, 1:-1] for j, coefficient in stencil) / hy
-        j = stencil[0][0]
-        vx = (V[j, 2:] - V[j, :-2]) / (2.0 * hx)
-        ux = (U[j, 2:] - U[j, :-2]) / (2.0 * hx)
-        edge_residuals.extend((A * (uy + vx), vy + C * ux))
-
-    ux_right = (3.0 * U[:, -1] - 4.0 * U[:, -2] + U[:, -3]) / (2.0 * hx)
-    vx_right = (3.0 * V[:, -1] - 4.0 * V[:, -2] + V[:, -3]) / (2.0 * hx)
-    uy_right = np.empty_like(y)
-    vy_right = np.empty_like(y)
-    uy_right[1:-1] = (U[2:, -1] - U[:-2, -1]) / (2.0 * hy)
-    vy_right[1:-1] = (V[2:, -1] - V[:-2, -1]) / (2.0 * hy)
-    uy_right[0] = (-3.0 * U[0, -1] + 4.0 * U[1, -1] - U[2, -1]) / (2.0 * hy)
-    uy_right[-1] = (3.0 * U[-1, -1] - 4.0 * U[-2, -1] + U[-3, -1]) / (2.0 * hy)
-    vy_right[0] = (-3.0 * V[0, -1] + 4.0 * V[1, -1] - V[2, -1]) / (2.0 * hy)
-    vy_right[-1] = (3.0 * V[-1, -1] - 4.0 * V[-2, -1] + V[-3, -1]) / (2.0 * hy)
-    applied_shear = y * (1.0 - y)
-    right_xx = ux_right + C * vy_right
-    right_xy = A * (uy_right + vx_right) - applied_shear
-
-    left_uy = np.gradient(U[:, 0], hy, edge_order=2)
-    left_vx = (-3.0 * V[:, 0] + 4.0 * V[:, 1] - V[:, 2]) / (2.0 * hx)
-    left_reaction = -float(np.trapezoid(A * (left_uy + left_vx), y))
-    return {
-        "max_interior_equilibrium_residual": float(max(np.max(np.abs(pde_x)), np.max(np.abs(pde_y)))),
-        "max_free_edge_traction_residual": float(max(np.max(np.abs(a)) for a in edge_residuals)),
-        "max_loaded_edge_traction_residual": float(max(np.max(np.abs(right_xx)), np.max(np.abs(right_xy)))),
-        "postprocessed_clamp_shear_reaction": left_reaction,
-        "estimated_shear_resultant_imbalance": left_reaction + 1.0 / 6.0,
+    # Navier equations checked independently at all interior nodes.
+    uxx = (U[1:-1, 2:] - 2*U[1:-1, 1:-1] + U[1:-1, :-2]) / h**2
+    uyy = (U[2:, 1:-1] - 2*U[1:-1, 1:-1] + U[:-2, 1:-1]) / h**2
+    vxx = (V[1:-1, 2:] - 2*V[1:-1, 1:-1] + V[1:-1, :-2]) / h**2
+    vyy = (V[2:, 1:-1] - 2*V[1:-1, 1:-1] + V[:-2, 1:-1]) / h**2
+    vxy = (V[2:, 2:] - V[2:, :-2] - V[:-2, 2:] + V[:-2, :-2]) / (4*h**2)
+    uxy = (U[2:, 2:] - U[2:, :-2] - U[:-2, 2:] + U[:-2, :-2]) / (4*h**2)
+    pde = max(np.abs(uxx + op["A"]*uyy + op["B"]*vxy).max(),
+              np.abs(vyy + op["A"]*vxx + op["B"]*uxy).max())
+    X, Y = np.meshgrid(x, y)
+    rotation = np.r_[-Y.ravel(), X.ravel()]
+    rigid = np.max(np.abs(K @ rotation))
+    checks = {
+        "mesh_spacing": h, "nodes": n, "degrees_of_freedom": 2*n,
+        "A": op["A"], "B": op["B"], "C": op["C"],
+        "force_residual_inf_all_free_nodes_including_right_corners": force_residual,
+        "equilibrium_residual_per_nodal_area_inf": density_residual,
+        "interior_navier_residual_inf": float(pde), "tolerance": epsilon,
+        "applied_force_y": float(f[n:].sum()), "applied_moment_about_origin": float(2*f[n:].sum()),
+        "clamp_reaction_x": force_x, "clamp_reaction_y": force_y,
+        "clamp_moment_about_origin": moment,
+        "force_balance_error_x": force_x,
+        "force_balance_error_y": force_y + float(f[n:].sum()),
+        "moment_balance_error": moment + float(2*f[n:].sum()),
+        "rigid_rotation_stiffness_residual": float(rigid),
+        "max_abs_u": float(np.abs(U).max()), "max_abs_v": float(np.abs(V).max()),
+        "max_displacement": float(magnitude[jmax, imax]),
+        "max_displacement_location": [float(x[imax]), float(y[jmax])],
+        "recovered_clamp_reaction_y": independent_ry,
+        "recovered_clamp_reaction_relative_error": abs(independent_ry + 1/6)/(1/6),
+        "recovered_sigma_yy_at_right_corners": sigyy[[0, -1], -1].tolist(),
+        "recovered_sigma_yy_max_on_free_edges_including_right_corners": float(np.abs(sigyy[[0, -1], 1:]).max()),
+        "recovered_sigma_xy_max_on_free_edges_including_right_corners": float(np.abs(sigxy[[0, -1], 1:]).max()),
+        "recovered_sigma_yy_at_fixed_free_corners": sigyy[[0, -1], 0].tolist(),
+        "stress_recovery_note": "Boundary loads enter integral nodal balances; recovered derivatives are approximate pointwise stresses, especially near fixed/free corners. Their errors are not algebraic residuals.",
     }
+    return x, y, U, V, rx, ry, checks
 
 
-def main() -> None:
+def make_figures(x, y, U, V, output_dir):
+    # Conventional 2D line profiles; no filled contours, heatmaps or colorbars.
+    fig, ax = plt.subplots(figsize=(6.934, 2.20), constrained_layout=True)
+    ax.plot([0, 2, 2, 0, 0], [0, 0, 1, 1, 0], color='black', lw=1.5)
+    for yy in np.linspace(0, 1, 11):
+        ax.plot([-.07, 0], [yy-.045, yy], color='black', lw=.8)
+    for yy in np.linspace(.10, .80, 6):
+        ax.annotate('', xy=(2.04, yy + .35*yy*(1-yy)), xytext=(2.04, yy),
+                    arrowprops={'arrowstyle': '->', 'color': '#1c4f85', 'lw': 1.3})
+    ax.text(-.14, .50, 'u=v=0', ha='right', va='center', fontsize=11)
+    ax.text(1, 1.07, 'Свободный край', ha='center', fontsize=11)
+    ax.text(1, -.20, 'Свободный край', ha='center', fontsize=11)
+    ax.text(2.16, .52, 'q(y)=y(1-y)', fontsize=11, va='center')
+    ax.set(xlim=(-.45, 2.70), ylim=(-.28, 1.24), aspect='equal')
+    ax.axis('off')
+    fig.savefig(output_dir / 'task3_geometry.png', dpi=240)
+    fig.savefig(output_dir / 'task3_geometry.svg')
+    plt.close(fig)
+    slices = (0.0, 0.25, 0.5)
+    styles = (("#1c4f85", "-"), ("#ba4b20", "--"), ("#333333", ":"))
+    for field, component in ((U, "u"), (V, "v")):
+        fig, ax = plt.subplots(figsize=(6.934, 3.20), constrained_layout=True)
+        for ys, (color, style) in zip(slices, styles):
+            j = int(np.argmin(np.abs(y - ys)))
+            ax.plot(x, field[j], color=color, ls=style, lw=1.9, label=f"y={ys:g}")
+        ax.set(xlim=(0, 2), xlabel="x", ylabel=component,
+               title=f"{component}(x, y) на горизонтальных сечениях")
+        ax.grid(True, alpha=0.22)
+        ax.legend(fontsize=11)
+        ax.tick_params(labelsize=11)
+        ax.xaxis.label.set_size(12)
+        ax.yaxis.label.set_size(12)
+        fig.savefig(output_dir / f"task3_{component}_profiles.png", dpi=240)
+        fig.savefig(output_dir / f"task3_{component}_profiles.svg")
+        plt.close(fig)
+
+
+def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=Path("task3_results"))
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    x, y, U, V, info = solve()
-    X, Y = np.meshgrid(x, y)
-    magnitude = np.hypot(U, V)
-    imax, jmax = np.unravel_index(np.argmax(magnitude), magnitude.shape)
-    checks = check_discrete_equations(x, y, U, V, info["A"], info["B"], info["C"])
-    diagnostics = {
-        "domain": [0.0, 2.0, 0.0, 1.0], "mesh_spacing": [0.025, 0.025],
-        "poisson_ratio": 0.3, "plane_model": "plane strain per lecture Navier system",
-        "stress_scale": "lambda + 2 mu", "traction": "sigma_xy_tilde = y(1-y), sigma_xx_tilde = 0 at x=2",
-        "coefficients": {key: info[key] for key in ("A", "B", "C", "lambda_over_mu")},
-        "nodes": int(len(x) * len(y)), "degrees_of_freedom": int(2 * len(x) * len(y)),
-        "scaled_system_residual_inf": info["residual_inf"], "tolerance": 1e-5,
-        "max_abs_u": float(np.max(np.abs(U))), "max_abs_v": float(np.max(np.abs(V))),
-        "max_displacement": float(magnitude[imax, jmax]),
-        "max_displacement_location": [float(X[imax, jmax]), float(Y[imax, jmax])],
-        "resultant_shear_load": 1.0 / 6.0,
-        "reaction_estimate_method": "Trapezoidal integral of A*(u_y+v_x) recovered by finite differences on x=0; mesh-sensitive near the fixed/free corner.",
-        "discrete_checks": checks,
-    }
-    with (args.output_dir / "task3_diagnostics.json").open("w", encoding="utf-8") as stream:
-        json.dump(diagnostics, stream, ensure_ascii=False, indent=2)
-    with (args.output_dir / "task3_solution.csv").open("w", newline="", encoding="utf-8") as stream:
-        writer = csv.writer(stream)
-        writer.writerow(["x", "y", "u", "v", "magnitude"])
-        for j, yy in enumerate(y):
-            for i, xx in enumerate(x):
-                writer.writerow([f"{xx:.6f}", f"{yy:.6f}", f"{U[j,i]:.12g}",
-                                 f"{V[j,i]:.12g}", f"{magnitude[j,i]:.12g}"])
-    make_figure(x, y, U, V, args.output_dir / "task3_elasticity_fields.png")
-    print(json.dumps(diagnostics, ensure_ascii=False, indent=2))
+    runs = []
+    for h in (0.025, 0.0125, 0.00625):
+        result = solve(h)
+        runs.append(result[-1])
+        if h == 0.025:
+            x, y, U, V, rx, ry, _ = result
+            with (args.output_dir / "task3_solution.csv").open("w", newline="", encoding="utf-8") as stream:
+                writer = csv.writer(stream)
+                writer.writerow(["x", "y", "U", "V"])
+                for j, yy in enumerate(y):
+                    for i, xx in enumerate(x):
+                        writer.writerow([xx, yy, U[j, i], V[j, i]])
+            with (args.output_dir / "task3_clamp_reactions.csv").open("w", newline="", encoding="utf-8") as stream:
+                writer = csv.writer(stream)
+                writer.writerow(["y", "nodal_Rx", "nodal_Ry"])
+                writer.writerows(zip(y, rx, ry))
+            make_figures(x, y, U, V, args.output_dir)
+    summary = {"model": "plane strain, scaled stress sigma/(lambda+2mu)",
+               "method": "conservative finite differences with integral traction closure",
+               "load": "q(y)=y(1-y) on x=2", "runs": runs}
+    (args.output_dir / "task3_diagnostics.json").write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

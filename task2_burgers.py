@@ -58,6 +58,11 @@ def solve_maccormack(nu: float, factor: float, *, h: float = 0.02,
     n_intervals = round((x_max - x_min) / h)
     x = np.linspace(x_min, x_max, n_intervals + 1)
     u = np.where(x < 0.0, 1.0, 0.0).astype(float)
+    # A centered value at the grid-aligned jump avoids a spurious O(h) mass
+    # defect for the viscous problem. For nu=0 retain the right trace; the
+    # exact value at the shock itself is immaterial to the entropy solution.
+    if nu > 0.0:
+        u[np.isclose(x, 0.0, rtol=0.0, atol=1e-12)] = 0.5
     u[0], u[-1] = 1.0, 0.0
 
     t = 0.0
@@ -123,13 +128,20 @@ def solve_maccormack(nu: float, factor: float, *, h: float = 0.02,
         "max_combined_stability_number": max_combined_stability_number,
         "max_abs_u": max_abs_u,
         "min_u": min_u,
+        "initial_value_at_jump": 0.5 if nu > 0.0 else 0.0,
     }
     mask = (x >= 0.0) & (x <= 4.0 + 1e-12)
     xr = x[mask]
     exact = analytic_inviscid(xr, t_final) if nu == 0 else analytic_viscous(xr, t_final, nu)
     err = np.abs(u[mask] - exact)
     diagnostics["l1_error_requested_interval"] = float(h * np.sum(err))
-    diagnostics["linf_error_requested_interval"] = float(np.max(err))
+    if nu == 0.0:
+        shock_node = np.isclose(xr, 0.5 * t_final, rtol=0.0, atol=1e-12)
+        linf_errors = err[~shock_node]
+        diagnostics["linf_error_at_shock_node_by_right_trace"] = float(np.max(err[shock_node]))
+    else:
+        linf_errors = err
+    diagnostics["linf_error_requested_interval"] = float(np.max(linf_errors))
     return x, u, diagnostics
 
 

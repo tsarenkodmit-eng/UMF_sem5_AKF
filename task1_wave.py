@@ -165,8 +165,10 @@ def write_outputs(output_dir: Path, p: Parameters) -> dict[str, float]:
     inside_wavefront = r <= diagnostics["wavefront_radius"] + 1e-12
     max_exact = float(np.max(np.abs(u_exact[inside_wavefront])))
     max_abs_error = float(np.max(absolute_error[inside_wavefront]))
+    max_error_location = float(r[inside_wavefront][np.argmax(absolute_error[inside_wavefront])])
     rel_error = max_abs_error / max_exact if max_exact else math.nan
     diagnostics["max_abs_error_m"] = max_abs_error
+    diagnostics["max_abs_error_location_m"] = max_error_location
     diagnostics["relative_max_error"] = rel_error
     diagnostics["max_exact_displacement_m"] = max_exact
 
