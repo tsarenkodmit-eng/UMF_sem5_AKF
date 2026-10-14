@@ -1,0 +1,2 @@
+Codex connection check, 2026-10-14.
+This temporary file will be removed in the next commit.
