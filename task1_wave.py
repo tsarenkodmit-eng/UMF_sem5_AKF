@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
 
-plt.rcParams.update({"font.family": "Times New Roman", "mathtext.fontset": "stix"})
+plt.rcParams.update({"font.family": "Times New Roman", "mathtext.fontset": "stix", "pdf.fonttype": 42})
 
 FloatArray = npt.NDArray[np.float64]
 
@@ -204,7 +204,8 @@ def write_outputs(output_dir: Path, p: Parameters) -> dict[str, float]:
     ax.grid(True, alpha=0.22)
     ax.legend(fontsize=10.5, loc="upper right")
     ax.tick_params(axis="both", labelsize=11)
-    fig.savefig(output_dir / "task1_displacement.png", dpi=240)
+    fig.savefig(output_dir / "task1_displacement.pdf")
+    fig.savefig(output_dir / "task1_displacement.png", dpi=600)
     fig.savefig(output_dir / "task1_displacement.svg")
     plt.close(fig)
 
@@ -222,7 +223,8 @@ def write_outputs(output_dir: Path, p: Parameters) -> dict[str, float]:
     ax.grid(True, alpha=0.22)
     ax.legend(fontsize=10.5, loc="best")
     ax.tick_params(axis="both", labelsize=11)
-    fig.savefig(output_dir / "task1_front.png", dpi=240)
+    fig.savefig(output_dir / "task1_front.pdf")
+    fig.savefig(output_dir / "task1_front.png", dpi=600)
     fig.savefig(output_dir / "task1_front.svg")
     plt.close(fig)
 

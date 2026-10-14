@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Conservative finite differences for the lecture's plane-strain Task 3.
+"""Conservative finite differences for plane-strain Task 3.
 
 The unknowns U,V are nodal displacements on the assigned rectangular mesh.
-Interior equations are the centered Navier differences from the lecture.
+Interior equations are the centered Navier differences.
 Boundary equations follow the discrete virtual-work balance, including both
 faces at each corner. Forces/moments and recovered stresses are checked
 separately: an algebraic residual is not a pointwise stress accuracy estimate.
@@ -21,7 +21,7 @@ import numpy as np
 from scipy.sparse import bmat, diags, kron
 from scipy.sparse.linalg import spsolve
 
-plt.rcParams.update({"font.family": "Times New Roman", "mathtext.fontset": "stix"})
+plt.rcParams.update({"font.family": "Times New Roman", "mathtext.fontset": "stix", "pdf.fonttype": 42})
 
 
 def difference_operators(n: int, h: float):
@@ -149,13 +149,14 @@ def make_figures(x, y, U, V, output_dir):
     for yy in np.linspace(.10, .80, 6):
         ax.annotate('', xy=(2.04, yy + .35*yy*(1-yy)), xytext=(2.04, yy),
                     arrowprops={'arrowstyle': '->', 'color': '#1c4f85', 'lw': 1.3})
-    ax.text(-.14, .50, 'u=v=0', ha='right', va='center', fontsize=11)
+    ax.text(-.14, .50, r'$u = v = 0$', ha='right', va='center', fontsize=12)
     ax.text(1, 1.07, 'Свободный край', ha='center', fontsize=11)
     ax.text(1, -.20, 'Свободный край', ha='center', fontsize=11)
-    ax.text(2.16, .52, 'q(y)=y(1-y)', fontsize=11, va='center')
+    ax.text(2.16, .52, r'$q(y) = y(1-y)$', fontsize=12, va='center')
     ax.set(xlim=(-.45, 2.70), ylim=(-.28, 1.24), aspect='equal')
     ax.axis('off')
-    fig.savefig(output_dir / 'task3_geometry.png', dpi=240)
+    fig.savefig(output_dir / 'task3_geometry.pdf')
+    fig.savefig(output_dir / 'task3_geometry.png', dpi=600)
     fig.savefig(output_dir / 'task3_geometry.svg')
     plt.close(fig)
     slices = (0.0, 0.25, 0.5)
@@ -164,7 +165,7 @@ def make_figures(x, y, U, V, output_dir):
         fig, ax = plt.subplots(figsize=(6.934, 3.20), constrained_layout=True)
         for ys, (color, style) in zip(slices, styles):
             j = int(np.argmin(np.abs(y - ys)))
-            ax.plot(x, field[j], color=color, ls=style, lw=1.9, label=f"y={ys:g}".replace(".", ","))
+            ax.plot(x, field[j], color=color, ls=style, lw=1.9, label=f"y = {ys:g}".replace(".", ","))
         ax.set(xlim=(0, 2), xlabel="x", ylabel=component,
                title=f"{component}(x, y) на горизонтальных сечениях")
         ax.grid(True, alpha=0.22)
@@ -173,7 +174,8 @@ def make_figures(x, y, U, V, output_dir):
         ax.tick_params(labelsize=11)
         ax.xaxis.label.set_size(12)
         ax.yaxis.label.set_size(12)
-        fig.savefig(output_dir / f"task3_{component}_profiles.png", dpi=240)
+        fig.savefig(output_dir / f"task3_{component}_profiles.pdf")
+        fig.savefig(output_dir / f"task3_{component}_profiles.png", dpi=600)
         fig.savefig(output_dir / f"task3_{component}_profiles.svg")
         plt.close(fig)
 

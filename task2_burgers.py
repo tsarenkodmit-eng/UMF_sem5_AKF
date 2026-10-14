@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.special import erfc
 
-plt.rcParams.update({"font.family": "Times New Roman", "mathtext.fontset": "stix"})
+plt.rcParams.update({"font.family": "Times New Roman", "mathtext.fontset": "stix", "pdf.fonttype": 42})
 
 
 def flux(u: np.ndarray) -> np.ndarray:
@@ -44,7 +44,7 @@ def analytic_viscous(x: np.ndarray, t: float, nu: float) -> np.ndarray:
 
 
 def stability_step(h: float, nu: float, u_max: float, factor: float) -> float:
-    """Lecture stability bound for explicit advection and diffusion."""
+    """Combined explicit advection and diffusion step bound."""
     u_max = max(float(u_max), 1e-12)
     return factor / (u_max / h + 2.0 * nu / h**2)
 
@@ -172,7 +172,7 @@ def write_outputs(output_dir: Path) -> dict[str, object]:
             mask = (x >= 0.0) & (x <= 4.0 + 1e-12)
             ax.plot(x[mask], u[mask], color=colors[factor], lw=1.7,
                     ls="-" if factor == 1.0 else "-.",
-                    label="Мак-Кормак, κ=" + ("1" if factor == 1.0 else "0,5"))
+                    label="Мак-Кормак, κ = " + ("1" if factor == 1.0 else "0,5"))
         xp = np.linspace(0.0, 4.0, 1201)
         ue = analytic_inviscid(xp, t_final) if nu == 0 else analytic_viscous(xp, t_final, nu)
         if nu == 0.0:
@@ -203,7 +203,8 @@ def write_outputs(output_dir: Path) -> dict[str, object]:
             inset.set_yticks([0.0, 1.0])
             inset.tick_params(labelsize=9)
             inset.grid(True, alpha=0.22)
-    fig.savefig(output_dir / "task2_burgers_profiles.png", dpi=240)
+    fig.savefig(output_dir / "task2_burgers_profiles.pdf")
+    fig.savefig(output_dir / "task2_burgers_profiles.png", dpi=600)
     fig.savefig(output_dir / "task2_burgers_profiles.svg")
     plt.close(fig)
 
@@ -214,7 +215,7 @@ def write_outputs(output_dir: Path) -> dict[str, object]:
             mask = (x >= 0.35) & (x <= 1.65)
             ax.plot(x[mask], u[mask], color=colors[factor], lw=1.7,
                     ls="-" if factor == 1.0 else "-.",
-                    label="Мак-Кормак, κ=" + ("1" if factor == 1.0 else "0,5"))
+                    label="Мак-Кормак, κ = " + ("1" if factor == 1.0 else "0,5"))
         xp = np.linspace(0.35, 1.65, 1001)
         ue = analytic_inviscid(xp, t_final) if nu == 0 else analytic_viscous(xp, t_final, nu)
         if nu == 0.0:
@@ -231,7 +232,8 @@ def write_outputs(output_dir: Path) -> dict[str, object]:
         ax.grid(True, alpha=0.22)
         ax.tick_params(axis="both", labelsize=11)
         ax.legend(fontsize=10.5, loc="best")
-    fig.savefig(output_dir / "task2_burgers_shock.png", dpi=240)
+    fig.savefig(output_dir / "task2_burgers_shock.pdf")
+    fig.savefig(output_dir / "task2_burgers_shock.png", dpi=600)
     fig.savefig(output_dir / "task2_burgers_shock.svg")
     plt.close(fig)
 
