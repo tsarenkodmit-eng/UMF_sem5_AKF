@@ -19,7 +19,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.sparse import bmat, diags, kron
-from scipy.sparse.linalg import spsolve
 
 plt.rcParams.update({"font.family": "Times New Roman", "mathtext.fontset": "stix", "pdf.fonttype": 42})
 
@@ -80,14 +79,49 @@ def recovered_stresses(U, V, h, A, C):
     return ux + C * vy, vy + C * ux, A * (uy + vx)
 
 
+def conjugate_gradients(matrix, rhs, nodal_areas, epsilon, max_iterations=100000):
+    """Diagonal PCG; stop only on the recomputed nodal force-density residual."""
+    if epsilon <= 0.0 or np.any(nodal_areas <= 0.0):
+        raise ValueError("Positive tolerance and nodal areas are required.")
+    inverse_diagonal = 1.0 / matrix.diagonal()
+    z = np.zeros_like(rhs)
+    residual = rhs.copy()
+    preconditioned = inverse_diagonal * residual
+    direction = preconditioned.copy()
+    product = float(residual @ preconditioned)
+    history = []
+    for iteration in range(max_iterations + 1):
+        actual_residual = rhs - matrix @ z
+        density_norm = float(np.max(np.abs(actual_residual / nodal_areas)))
+        if iteration == 0 or iteration % 10 == 0 or density_norm <= epsilon:
+            history.append([iteration, density_norm])
+        if density_norm <= epsilon:
+            return z, iteration, history
+        if iteration == max_iterations:
+            break
+        image = matrix @ direction
+        denominator = float(direction @ image)
+        if denominator <= 0.0 or product <= 0.0:
+            raise RuntimeError("PCG requires positive definite stiffness and preconditioner.")
+        step = product / denominator
+        z += step * direction
+        residual -= step * image
+        preconditioned = inverse_diagonal * residual
+        new_product = float(residual @ preconditioned)
+        direction = preconditioned + (new_product / product) * direction
+        product = new_product
+    raise RuntimeError(f"PCG did not reach the nodal-area tolerance in {max_iterations} iterations.")
+
+
 def solve(h: float = 0.025, nu: float = 0.3, epsilon: float = 1e-5):
     x, y, K, f, fixed, free, op = assemble(h, nu)
     z = np.zeros(len(f))
-    z[free] = spsolve(K[free, :][:, free], f[free])
+    Hdiag = np.tile(op["H"].diagonal(), 2)
+    z[free], iterations, history = conjugate_gradients(
+        K[free, :][:, free], f[free], Hdiag[free], epsilon)
     residual = K @ z - f
     n = len(f) // 2
     U, V = z[:n].reshape(len(y), len(x)), z[n:].reshape(len(y), len(x))
-    Hdiag = np.tile(op["H"].diagonal(), 2)
     force_residual = float(np.max(np.abs(residual[free])))
     density_residual = float(np.max(np.abs(residual[free] / Hdiag[free])))
     if not np.isfinite(z).all() or density_residual > epsilon:
@@ -115,6 +149,8 @@ def solve(h: float = 0.025, nu: float = 0.3, epsilon: float = 1e-5):
     rigid = np.max(np.abs(K @ rotation))
     checks = {
         "mesh_spacing": h, "nodes": n, "degrees_of_freedom": 2*n,
+        "linear_solver": "diagonally preconditioned conjugate gradients",
+        "iterations": iterations, "iteration_history_nodal_area_residual": history,
         "A": op["A"], "B": op["B"], "C": op["C"],
         "force_residual_inf_all_free_nodes_including_right_corners": force_residual,
         "equilibrium_residual_per_nodal_area_inf": density_residual,
@@ -126,10 +162,14 @@ def solve(h: float = 0.025, nu: float = 0.3, epsilon: float = 1e-5):
         "force_balance_error_y": force_y + float(f[n:].sum()),
         "moment_balance_error": moment + float(2*f[n:].sum()),
         "rigid_rotation_stiffness_residual": float(rigid),
+        "strain_energy": float(0.5 * z @ (K @ z)),
+        "external_work": float(f @ z),
+        "twice_energy_minus_external_work": float(z @ (K @ z) - f @ z),
         "max_abs_u": float(np.abs(U).max()), "max_abs_v": float(np.abs(V).max()),
         "max_displacement": float(magnitude[jmax, imax]),
         "max_displacement_location": [float(x[imax]), float(y[jmax])],
         "recovered_clamp_reaction_y": independent_ry,
+        "recovered_shear_resultant_at_midlength": float(np.trapezoid(sigxy[:, op["nx"] // 2], y)),
         "recovered_clamp_reaction_relative_error": abs(independent_ry + 1/6)/(1/6),
         "recovered_sigma_yy_at_right_corners": sigyy[[0, -1], -1].tolist(),
         "recovered_sigma_yy_max_on_free_edges_including_right_corners": float(np.abs(sigyy[[0, -1], 1:]).max()),
@@ -177,6 +217,25 @@ def make_figures(x, y, U, V, output_dir):
         fig.savefig(output_dir / f"task3_{component}_profiles.pdf")
         fig.savefig(output_dir / f"task3_{component}_profiles.png", dpi=600)
         fig.savefig(output_dir / f"task3_{component}_profiles.svg")
+        plt.close(fig)
+    sections = (0.5, 1.0, 2.0)
+    for field, component in ((U, "u"), (V, "v")):
+        fig, ax = plt.subplots(figsize=(6.934, 3.20), constrained_layout=True)
+        for xs, (color, style) in zip(sections, styles):
+            i = int(np.argmin(np.abs(x - xs)))
+            ax.plot(y, field[:, i], color=color, ls=style, lw=1.9,
+                    label=f"x = {xs:g}".replace(".", ","))
+        ax.set(xlim=(0, 1), xlabel="y", ylabel=component,
+               title=f"{component}(x, y) на вертикальных сечениях")
+        ax.grid(True, alpha=0.22)
+        ax.title.set_fontsize(12.5)
+        ax.legend(fontsize=10.5)
+        ax.tick_params(labelsize=11)
+        ax.xaxis.label.set_size(12)
+        ax.yaxis.label.set_size(12)
+        fig.savefig(output_dir / f"task3_{component}_width_profiles.pdf")
+        fig.savefig(output_dir / f"task3_{component}_width_profiles.png", dpi=600)
+        fig.savefig(output_dir / f"task3_{component}_width_profiles.svg")
         plt.close(fig)
 
 

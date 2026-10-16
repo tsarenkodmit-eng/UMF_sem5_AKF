@@ -162,10 +162,9 @@ def write_outputs(output_dir: Path, p: Parameters) -> dict[str, float]:
     r, u_fd, diagnostics = solve_finite_differences(p)
     u_exact = analytic_displacement(r, p.final_time, p, c)
     absolute_error = np.abs(u_fd - u_exact)
-    inside_wavefront = r <= diagnostics["wavefront_radius"] + 1e-12
-    max_exact = float(np.max(np.abs(u_exact[inside_wavefront])))
-    max_abs_error = float(np.max(absolute_error[inside_wavefront]))
-    max_error_location = float(r[inside_wavefront][np.argmax(absolute_error[inside_wavefront])])
+    max_exact = float(np.max(np.abs(u_exact)))
+    max_abs_error = float(np.max(absolute_error))
+    max_error_location = float(r[np.argmax(absolute_error)])
     rel_error = max_abs_error / max_exact if max_exact else math.nan
     diagnostics["max_abs_error_m"] = max_abs_error
     diagnostics["max_abs_error_location_m"] = max_error_location
@@ -176,9 +175,8 @@ def write_outputs(output_dir: Path, p: Parameters) -> dict[str, float]:
         refined_p = p._replace(h_over_R=h_over_R)
         refined_r, refined_u, refined_diag = solve_finite_differences(refined_p)
         refined_exact = analytic_displacement(refined_r, p.final_time, refined_p, c)
-        refined_mask = refined_r <= refined_diag["wavefront_radius"] + 1e-12
-        refined_max_error = float(np.max(np.abs(refined_u[refined_mask] - refined_exact[refined_mask])))
-        refined_scale = float(np.max(np.abs(refined_exact[refined_mask])))
+        refined_max_error = float(np.max(np.abs(refined_u - refined_exact)))
+        refined_scale = float(np.max(np.abs(refined_exact)))
         diagnostics[f"refinement_{level}_h_m"] = h_over_R * p.cavity_radius
         diagnostics[f"refinement_{level}_max_abs_error_m"] = refined_max_error
         diagnostics[f"refinement_{level}_relative_error"] = refined_max_error / refined_scale

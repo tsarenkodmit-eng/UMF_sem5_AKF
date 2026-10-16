@@ -189,7 +189,7 @@ def write_outputs(output_dir: Path) -> dict[str, object]:
         ax.tick_params(axis="both", labelsize=11)
         ax.legend(fontsize=10.5, loc="best")
         if nu == 0.0:
-            inset = ax.inset_axes([0.61, 0.10, 0.35, 0.36])
+            inset = ax.inset_axes([0.32, 0.30, 0.35, 0.42])
             for factor in (1.0, 0.5):
                 x, u, _diag = solutions[(nu, factor)]
                 zoom = (x >= 0.72) & (x <= 1.20)
