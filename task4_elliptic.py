@@ -13,7 +13,6 @@ import matplotlib.pyplot as plt
 import mpmath as mp
 import numpy as np
 from numpy.polynomial.legendre import leggauss
-from scipy.interpolate import CubicSpline, RectBivariateSpline
 from scipy.sparse import csr_matrix, diags, tril, triu
 from scipy.sparse.linalg import spsolve_triangular
 from scipy.special import k0, k1, y0, y1
@@ -29,21 +28,12 @@ PRINTED_A = (
     (".738095238095238", "-.571428571428571", "-1.476190476190476", "-1.142857142857143", "2.690476190476191"),
 )
 PRINTED_B = ("1.470526299866703", "-1.881907599231525", "-.704984621975347", ".708320756536520", "2.880495543856732")
-INTEGER_A = ((325,-24,190,-48,155),(-24,24,48,48,-120),(190,48,40,96,-310),(-48,48,96,96,-240),(155,-120,-310,-240,565))
 
 
 def canonical_reduction():
     mp.mp.dps = 75
     a = mp.matrix(PRINTED_A)
     b = mp.matrix(PRINTED_B)
-    a0 = mp.matrix(INTEGER_A) / 210
-    columns = ((2,0,1,0,0),(-1,0,2,0,1),(1,-1,-2,-2,5),(0,-2,0,1,0),(1,6,-2,12,5))
-    denominators = (5,6,35,5,210)
-    q = mp.matrix([[mp.mpf(columns[j][i])/mp.sqrt(denominators[j]) for j in range(5)] for i in range(5)])
-    s = mp.diag([1/mp.sqrt(2),1,mp.mpf('.5'),1,1])
-    alpha = s*q.T
-    delta = a-a0
-    error = alpha*delta*alpha.T
     eig, qd = mp.eigsy(a)
     for j in range(5):
         if qd[0,j] < 0:
@@ -55,15 +45,14 @@ def canonical_reduction():
     norm_inf = lambda matrix: max(sum(abs(matrix[i,j]) for j in range(matrix.cols)) for i in range(matrix.rows))
     strings = lambda matrix: [[mp.nstr(matrix[i,j],35) for j in range(matrix.cols)] for i in range(matrix.rows)]
     return {
-        "printed_A": PRINTED_A, "printed_b": PRINTED_B, "integer_A0_times_210": INTEGER_A,
-        "A0_eigenvalues": [2,-1,4,0,0], "A0_inertia_positive_negative_zero": [2,1,2],
-        "Q": strings(q), "alpha0": strings(alpha), "gamma0": strings(alpha*b),
-        "max_entry_A_minus_A0": mp.nstr(max(abs(v) for v in delta),35),
-        "transformed_rounding_error_inf": mp.nstr(norm_inf(error),35),
-        "A0_canonical_residual_inf": mp.nstr(norm_inf(alpha*a0*alpha.T-mp.diag([1,-1,1,0,0])),12),
+        "printed_A": PRINTED_A, "printed_b": PRINTED_B,
         "literal_A_eigenvalues": [mp.nstr(v,35) for v in eig],
         "literal_A_inertia_positive_negative_zero": [3,2,0],
         "literal_Q": strings(qd), "literal_alpha": strings(ad), "literal_gamma": strings(ad*b),
+        "orthogonal_first_order": strings(qd.T*b),
+        "normalizing_scales": [mp.nstr(mp.sqrt(abs(v)),35) for v in eig],
+        "orthogonal_residual_inf": mp.nstr(norm_inf(qd.T*a*qd-mp.diag(eig)),12),
+        "orthogonality_residual_inf": mp.nstr(norm_inf(qd.T*qd-mp.eye(5)),12),
         "literal_canonical_residual_inf": mp.nstr(norm_inf(ad*a*ad.T-target),12),
     }
 
@@ -148,14 +137,25 @@ def build_boundary_traces(x, y, u, exact_reference=False):
         sides.append({
             "name": name,
             "nodes": nodes,
-            "u": CubicSpline(nodes, values_u, bc_type="not-a-knot"),
-            "q": CubicSpline(nodes, values_q, bc_type="not-a-knot"),
+            "u": lambda t, nodes=nodes, values=values_u: np.interp(t, nodes, values),
+            "q": lambda t, nodes=nodes, values=values_q: np.interp(t, nodes, values),
             "values_u": np.asarray(values_u),
             "values_q": np.asarray(values_q),
             "origin": np.asarray(origin),
             "tangent": np.asarray(tangent),
             "normal": np.asarray(normal),
         })
+    # Preserve the prescribed continuous data. Only the missing traces are
+    # reconstructed linearly from the numerical nodes.
+    sides[0]["u"] = lambda t: np.zeros_like(np.asarray(t), dtype=float)
+    sides[2]["u"] = lambda t: np.asarray(t)**3 + 1.0
+    sides[1]["q"] = lambda t: 12.0*np.asarray(t)
+    sides[3]["q"] = lambda t: np.zeros_like(np.asarray(t), dtype=float)
+    if exact_reference:
+        sides[0]["q"] = lambda t: -np.asarray(t)**3
+        sides[2]["q"] = lambda t: np.asarray(t)**3 + 3.0
+        sides[1]["u"] = lambda t: np.asarray(t)*(8.0+np.asarray(t)**2)
+        sides[3]["u"] = lambda t: np.asarray(t)**3
     return sides
 
 
@@ -275,7 +275,14 @@ def evaluate_green_identity(x, y, u, c, point, order=64, exact_reference=False):
     elif alpha == 0.0:
         point_u = None
     else:
-        point_u = float(RectBivariateSpline(y, x, u, kx=3, ky=3, s=0).ev(point[1], point[0]))
+        i = int(np.argmin(np.abs(x-point[0])))
+        j = int(np.argmin(np.abs(y-point[1])))
+        if abs(x[i]-point[0]) < 1e-12 and abs(y[j]-point[1]) < 1e-12:
+            point_u = float(u[j, i])
+        else:
+            # Linear interpolation in x, then in y, also defines a bilinear
+            # value for points which do not coincide with grid nodes.
+            point_u = float(np.interp(point[1], y, [np.interp(point[0], x, row) for row in u]))
     lhs = 0.0 if alpha == 0.0 else alpha*point_u
     return {
         "c": int(c), "point": list(map(float, point)), "order": int(order),
@@ -310,7 +317,7 @@ def audit_green_identities(x, y, u, c, orders=(16, 32, 64), include_exact_refere
     return {
         "c": int(c),
         "identity": "alpha*u = integral_boundary(G*q-u*G_n) - integral_domain(G*f); (Delta+c)G=-delta",
-        "boundary_interpolation": "Separate not-a-knot cubic splines on each side. Prescribed Dirichlet/Neumann data are exact; missing side u comes from U, missing top/bottom q from second-order one-sided y differences.",
+        "boundary_interpolation": "Piecewise linear interpolation of missing traces on each side. Prescribed Dirichlet/Neumann data are used analytically. Missing side u comes from U, missing top/bottom q from second-order one-sided y differences. The assigned nonexterior observation points coincide with grid nodes.",
         "volume_integration": "Analytic assigned f. Duffy triangles about interior/boundary observation point with constant-density log subtraction; ordinary tensor Gaussian quadrature for exterior point.",
         "boundary_integration": "Gaussian quadrature separately on every grid panel, split at the observation projection. The logarithmic singularity on the observation side is subtracted and integrated analytically; G_n=0 on the same flat side away from the observation point.",
         "quadrature_orders": list(map(int, orders)),
@@ -415,6 +422,13 @@ def plot_outputs(directory, solutions, runs, green):
     ax.text(1,1.1,r"$u = x^3+1$",ha="center",fontsize=12)
     ax.text(-.08,.48,r"$u_x = 0$",ha="right",fontsize=12)
     ax.text(2.08,.48,r"$u_x = 12y$",fontsize=12)
+    ax.annotate("",xy=(2.34,0),xytext=(2,0),arrowprops={"arrowstyle":"->","lw":1.1,"color":"#333333"})
+    ax.annotate("",xy=(0,1.23),xytext=(0,1),arrowprops={"arrowstyle":"->","lw":1.1,"color":"#333333"})
+    ax.text(2.39,-.02,"x",fontsize=12,va="center")
+    ax.text(-.03,1.26,"y",fontsize=12,ha="center")
+    ax.text(-.04,-.04,"0",fontsize=10,ha="right",va="top")
+    ax.text(2,-.04,"2",fontsize=10,ha="center",va="top")
+    ax.text(-.04,1,"1",fontsize=10,ha="right",va="center")
     for px,py,label in ((1.1,.3,"M₁"),(1.1,-.3,"M₂"),(1.1,1,"M₃")):
         ax.plot(px,py,"o",color="#1c4f85",ms=4)
         offset = (6,-14) if py == 1 else (6,4)
@@ -429,6 +443,7 @@ def plot_outputs(directory, solutions, runs, green):
         axes[0].plot(x,u[j],color=color,ls=ls,lw=1.7,label=f"МКР, y = {ys:g}".replace(".",","))
         axes[0].plot(x,exact_solution(x,ys),color=color,marker="o",ls="none",ms=3,markevery=2)
     axes[0].set(xlabel="x",ylabel="u",title="Решение при c = 1 по горизонтальным сечениям")
+    axes[0].plot([],[],color="#333333",marker="o",ls="none",ms=3,label=r"Точное $u_*$")
     for c in CASES:
         xx,yy,uu = solutions[c]
         j = int(np.argmin(abs(yy-.5)))

@@ -27,7 +27,9 @@ def flux(u: np.ndarray) -> np.ndarray:
 
 def analytic_inviscid(x: np.ndarray, t: float) -> np.ndarray:
     """Entropy solution: a shock connecting left state 1 to right state 0."""
-    return np.where(x < 0.5 * t, 1.0, 0.0)
+    if t <= 0.0:
+        return np.where(x <= 0.0, 1.0, 0.0)
+    return np.where(x <= 0.5 * t, 1.0, 0.0)
 
 
 def analytic_viscous(x: np.ndarray, t: float, nu: float) -> np.ndarray:
@@ -35,7 +37,7 @@ def analytic_viscous(x: np.ndarray, t: float, nu: float) -> np.ndarray:
     if nu <= 0.0:
         raise ValueError("nu must be positive for the viscous exact solution")
     if t <= 0.0:
-        return np.where(x < 0.0, 1.0, np.where(x == 0.0, 0.5, 0.0))
+        return np.where(x <= 0.0, 1.0, 0.0)
     q = 2.0 * math.sqrt(nu * t)
     term_right = erfc(-x / q)
     exponent = (t - 2.0 * x) / (4.0 * nu)
@@ -57,13 +59,13 @@ def solve_maccormack(nu: float, factor: float, *, h: float = 0.02,
         raise ValueError("Invalid solver parameters")
     n_intervals = round((x_max - x_min) / h)
     x = np.linspace(x_min, x_max, n_intervals + 1)
+    # Keep the lecture's literal nodal convention u_0(x)=1 for x<=0.
+    # With trapezoidal nodal integration this puts h/2 extra mass at the jump;
+    # the resulting leading O(h) shift is documented separately from scheme error.
     u = np.where(x < 0.0, 1.0, 0.0).astype(float)
-    # A centered value at the grid-aligned jump avoids a spurious O(h) mass
-    # defect for the viscous problem. For nu=0 retain the right trace; the
-    # exact value at the shock itself is immaterial to the entropy solution.
-    if nu > 0.0:
-        u[np.isclose(x, 0.0, rtol=0.0, atol=1e-12)] = 0.5
+    u[np.isclose(x, 0.0, rtol=0.0, atol=1e-12)] = 1.0
     u[0], u[-1] = 1.0, 0.0
+    initial_mass = float(np.trapezoid(u, x))
 
     t = 0.0
     n_steps = 0
@@ -128,7 +130,12 @@ def solve_maccormack(nu: float, factor: float, *, h: float = 0.02,
         "max_combined_stability_number": max_combined_stability_number,
         "max_abs_u": max_abs_u,
         "min_u": min_u,
-        "initial_value_at_jump": 0.5 if nu > 0.0 else 0.0,
+        "initial_value_at_jump": 1.0,
+        "initial_trapezoid_mass": initial_mass,
+        "initial_mass_excess_over_continuum": initial_mass + x_min,
+        "final_trapezoid_mass": float(np.trapezoid(u, x)),
+        "conservative_mass_balance_defect": float(np.trapezoid(u, x)) - initial_mass - 0.5 * t_final,
+        "inviscid_exact_value_at_shock": 1.0,
     }
     mask = (x >= 0.0) & (x <= 4.0 + 1e-12)
     xr = x[mask]
@@ -139,7 +146,8 @@ def solve_maccormack(nu: float, factor: float, *, h: float = 0.02,
         shock_node = np.isclose(xr, 0.5 * t_final, rtol=0.0, atol=1e-12)
         linf_errors = err[~shock_node]
         if np.any(shock_node):
-            diagnostics["linf_error_at_shock_node_by_right_trace"] = float(np.max(err[shock_node]))
+            diagnostics["error_at_shock_node_by_left_trace"] = float(np.max(err[shock_node]))
+            diagnostics["error_at_shock_node_by_right_trace"] = float(np.max(np.abs(u[mask][shock_node])))
     else:
         linf_errors = err
     diagnostics["linf_error_requested_interval"] = float(np.max(linf_errors))

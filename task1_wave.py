@@ -85,8 +85,9 @@ def analytic_displacement(r: FloatArray, t: float, p: Parameters,
 def solve_finite_differences(p: Parameters) -> tuple[FloatArray, FloatArray, dict[str, float]]:
     """Explicit second-order FD solution at the requested final time.
 
-    The internal-pressure condition is imposed with a second-order centered
-    derivative and a ghost point at r=R. The outer boundary is placed beyond
+    The internal-pressure condition uses the three-point one-sided derivative
+    (-3*u_0+4*u_1-u_2)/(2*h). The boundary displacement is recovered after
+    each interior update. The outer boundary is placed beyond
     the wavefront so it cannot influence the requested time interval.
     """
     c = material_constants(p)
@@ -100,17 +101,9 @@ def solve_finite_differences(p: Parameters) -> tuple[FloatArray, FloatArray, dic
     r = R + h * np.arange(n_intervals + 1, dtype=float)
     nt = int(math.ceil(p.final_time / dt))
 
-    def spatial_operator(u: FloatArray, pressure_now: float) -> FloatArray:
+    def spatial_operator(u: FloatArray) -> FloatArray:
         """Second-order approximation of u_rr + 2*u_r/r - 2*u/r^2."""
         L = np.zeros_like(u)
-        # Stress at r=R: K*u_r + 2*lambda*u/R = -p.
-        # With u_r=(u_1-u_-1)/(2h), solve for the ghost value u_-1.
-        u_ghost = u[1] + (2.0 * h / K) * (pressure_now + 2.0 * lam * u[0] / R)
-        L[0] = (
-            (u[1] - 2.0 * u[0] + u_ghost) / h**2
-            + (u[1] - u_ghost) / (R * h)
-            - 2.0 * u[0] / R**2
-        )
         ri = r[1:-1]
         L[1:-1] = (
             (u[2:] - 2.0 * u[1:-1] + u[:-2]) / h**2
@@ -121,17 +114,27 @@ def solve_finite_differences(p: Parameters) -> tuple[FloatArray, FloatArray, dic
         L[-1] = 0.0
         return L
 
+    def apply_boundary(u: FloatArray) -> None:
+        # K*(-3*u0+4*u1-u2)/(2*h)+2*lambda*u0/R=-P0.
+        u[0] = (2.0 * h * P0 / K + 4.0 * u[1] - u[2]) / (
+            3.0 - 4.0 * lam * h / (K * R)
+        )
+        u[-1] = 0.0
+
     # Initial conditions: u(r,0)=0 and u_t(r,0)=0.
     u0 = np.zeros_like(r)
-    # Second-order startup using the right-hand limit of the pressure step.
-    u1 = u0 + 0.5 * dt**2 * cp**2 * spatial_operator(u0, P0)
-    u1[-1] = 0.0
+    # Taylor startup in the interior: displacement, velocity and acceleration
+    # are initially zero there. At the first positive time impose the pressure
+    # with the same one-sided boundary equation used on later layers. The
+    # sudden load is incompatible with rest at the single corner (R,0).
+    u1 = u0 + 0.5 * dt**2 * cp**2 * spatial_operator(u0)
+    apply_boundary(u1)
     previous, current = u0, u1
 
     for _n in range(1, nt):
-        L = spatial_operator(current, P0)
+        L = spatial_operator(current)
         following = 2.0 * current - previous + dt**2 * cp**2 * L
-        following[-1] = 0.0
+        apply_boundary(following)
         previous, current = current, following
         if not np.isfinite(current).all():
             raise FloatingPointError("Non-finite value encountered in FD solution.")
