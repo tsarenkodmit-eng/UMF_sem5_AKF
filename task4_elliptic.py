@@ -5,12 +5,12 @@ from __future__ import annotations
 import argparse
 import json
 from functools import lru_cache
+from fractions import Fraction
 from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import mpmath as mp
 import numpy as np
 from numpy.polynomial.legendre import leggauss
 from scipy.sparse import csr_matrix, diags, tril, triu
@@ -31,29 +31,43 @@ PRINTED_B = ("1.470526299866703", "-1.881907599231525", "-.704984621975347", ".7
 
 
 def canonical_reduction():
-    mp.mp.dps = 75
-    a = mp.matrix(PRINTED_A)
-    b = mp.matrix(PRINTED_B)
-    eig, qd = mp.eigsy(a)
-    for j in range(5):
-        if qd[0,j] < 0:
-            for i in range(5):
-                qd[i,j] = -qd[i,j]
-    sd = mp.diag([1/mp.sqrt(abs(eig[i])) for i in range(5)])
-    ad = sd*qd.T
-    target = mp.diag([mp.sign(eig[i]) for i in range(5)])
-    norm_inf = lambda matrix: max(sum(abs(matrix[i,j]) for j in range(matrix.cols)) for i in range(matrix.rows))
-    strings = lambda matrix: [[mp.nstr(matrix[i,j],35) for j in range(matrix.cols)] for i in range(matrix.rows)]
+    # Treat the last printed digits of A as rounding of this fractional matrix.
+    # This assumption is explicit in the PDF; b retains its supplied values.
+    integers = np.array([
+        [325,-24,190,-48,155],[-24,24,48,48,-120],
+        [190,48,40,96,-310],[-48,48,96,96,-240],
+        [155,-120,-310,-240,565]],dtype=np.int64)
+    vectors = np.array([
+        [1,0,-2,0,-1],[0,-2,0,1,0],[1,6,-2,12,5],
+        [2,0,1,0,0],[1,-1,-2,-2,5]],dtype=np.int64)
+    eigenvalues = np.array([-1,0,0,2,4],dtype=np.int64)
+    norm_squared = np.array([6,5,210,5,35],dtype=np.int64)
+    # These two identities use integers, so the zero eigenvalues are exact.
+    if not np.array_equal(integers@vectors.T,210*vectors.T*eigenvalues):
+        raise ArithmeticError("The exact eigenvector identities failed.")
+    if not np.array_equal(vectors@vectors.T,np.diag(norm_squared)):
+        raise ArithmeticError("The exact orthogonality identities failed.")
+    q = (vectors/np.sqrt(norm_squared[:,None])).T
+    scales = np.array([1.,1.,1.,np.sqrt(2),2.])
+    alpha = q.T/scales[:,None]
+    a = integers/210.
+    b = np.array(PRINTED_B,dtype=float)
+    difference = max(abs(Fraction(PRINTED_A[i][j])-Fraction(int(integers[i,j]),210))
+                     for i in range(5) for j in range(5))
+    target = np.diag([-1.,0.,0.,1.,1.])
     return {
         "printed_A": PRINTED_A, "printed_b": PRINTED_B,
-        "literal_A_eigenvalues": [mp.nstr(v,35) for v in eig],
-        "literal_A_inertia_positive_negative_zero": [3,2,0],
-        "literal_Q": strings(qd), "literal_alpha": strings(ad), "literal_gamma": strings(ad*b),
-        "orthogonal_first_order": strings(qd.T*b),
-        "normalizing_scales": [mp.nstr(mp.sqrt(abs(v)),35) for v in eig],
-        "orthogonal_residual_inf": mp.nstr(norm_inf(qd.T*a*qd-mp.diag(eig)),12),
-        "orthogonality_residual_inf": mp.nstr(norm_inf(qd.T*qd-mp.eye(5)),12),
-        "literal_canonical_residual_inf": mp.nstr(norm_inf(ad*a*ad.T-target),12),
+        "input_interpretation":"A0=N/210 reconstructs the rounded printed matrix; b is used as supplied.",
+        "rational_numerator":integers.tolist(),"rational_denominator":210,
+        "maximum_entry_change_exact":str(difference),
+        "maximum_entry_change":float(difference),
+        "eigenvalues":eigenvalues.tolist(),"integer_eigenvectors_rows":vectors.tolist(),
+        "squared_norms":norm_squared.tolist(),"Q":q.tolist(),
+        "alpha":alpha.tolist(),"gamma":(alpha@b).tolist(),
+        "inverse_alpha":np.linalg.inv(alpha).tolist(),
+        "canonical_diagonal":[-1,0,0,1,1],
+        "canonical_residual_inf":float(np.linalg.norm(alpha@a@alpha.T-target,np.inf)),
+        "orthogonality_residual_inf":float(np.linalg.norm(q.T@q-np.eye(5),np.inf)),
     }
 
 
@@ -473,8 +487,8 @@ def plot_outputs(directory, solutions, runs, green):
         hs = [r["hx"] for r in selected]
         axes[0].loglog(hs,[r["error_inf"] for r in selected],color=colors[c],ls=styles[c],marker="o",lw=1.6,label=f"c = {c}")
         axes[1].loglog(hs,[r["green_max_residual"] for r in selected],color=colors[c],ls=styles[c],marker="o",lw=1.6,label=f"c = {c}")
-    axes[0].set(xlabel=r"$h_x$",ylabel=r"$E_\infty$",title="Сгущение сетки: ошибка решения")
-    axes[1].set(xlabel=r"$h_x$",ylabel=r"$\max_m|R(M_m)|$",title="Сгущение сетки: невязка ГИУ")
+    axes[0].set(xlabel=r"$h_x$",ylabel=r"$E_N$",title="Сгущение сетки: ошибка решения")
+    axes[1].set(xlabel=r"$h_x$",ylabel=r"$\max_m|R_c(M_m)|$",title="Сгущение сетки: невязка ГИУ")
     for ax in axes:
         ax.grid(alpha=.22,which="both"); ax.legend(fontsize=10.5); ax.tick_params(labelsize=11)
         ax.xaxis.label.set_size(12); ax.yaxis.label.set_size(12); ax.title.set_fontsize(12.5)

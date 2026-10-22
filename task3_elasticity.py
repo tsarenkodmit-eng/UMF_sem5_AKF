@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Task 3: central Navier differences and direct traction equations.
 
-Boundary derivatives use the three-point one-sided Taylor formula. Successive
+Boundary derivatives use the two-point one-sided formula. Successive
 Gauss-Seidel updates are relaxed only in the interior. The stopping criterion
 recomputes the actual PDE and traction equation residuals. Recovered reactions
 and corner stresses are reported separately from this algebraic tolerance.
@@ -43,9 +43,9 @@ def assemble(h=0.025, nu=0.3):
         # Coefficients of h*D_x or h*D_y, including corner endpoints.
         position, end = (i,nx) if axis == 0 else (j,ny)
         if position == 0:
-            terms = ((0,-1.5),(1,2),(2,-0.5))
+            terms = ((0,-1),(1,1))
         elif position == end:
-            terms = ((end,1.5),(end-1,-2),(end-2,0.5))
+            terms = ((end,1),(end-1,-1))
         else:
             terms = ((position-1,-0.5),(position+1,0.5))
         for position,coefficient in terms:
@@ -125,8 +125,8 @@ ordinary sequence of scalar Gauss-Seidel updates.
 
 
 def recovered_stresses(U,V,h,A,C):
-    uy,ux = np.gradient(U,h,h,edge_order=2)
-    vy,vx = np.gradient(V,h,h,edge_order=2)
+    uy,ux = np.gradient(U,h,h,edge_order=1)
+    vy,vx = np.gradient(V,h,h,edge_order=1)
     return ux+C*vy,vy+C*ux,A*(uy+vx)
 
 
@@ -185,7 +185,7 @@ def solve(h=0.025,nu=0.3,epsilon=1e-5,omega=1.95,previous=None):
     jmax,imax = np.unravel_index(np.argmax(mag),mag.shape)
     checks = {
         "mesh_spacing":h,"nodes":len(x)*len(y),"degrees_of_freedom":len(z),
-        "method":"central Navier differences; direct second-order traction equations",
+        "method":"central Navier differences; direct first-order traction equations",
         "linear_solver":"scalar Gauss-Seidel with relaxed interior updates",
         "interior_relaxation":omega,"boundary_relaxation":1.0,
         "initial_guess":"zero" if previous is None else "bilinear transfer from preceding mesh",
@@ -322,7 +322,7 @@ def main():
                 writer.writerows(zip(x,resultants))
             make_figures(x,y,U,V,args.output_dir)
         summary={"model":"plane strain, scaled stress sigma/(lambda+2mu)",
-                 "method":"direct finite differences with second-order traction boundaries",
+                 "method":"direct finite differences with first-order traction boundaries",
                  "load":"q(y)=y(1-y) on x=2","runs":runs}
         (args.output_dir/"task3_diagnostics.json").write_text(
             json.dumps(summary,ensure_ascii=False,indent=2),encoding="utf-8")
