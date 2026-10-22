@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Task 3: central Navier differences and direct traction equations.
 
-Boundary derivatives use the two-point one-sided formula. Successive
-Gauss-Seidel updates are relaxed only in the interior. The stopping criterion
+Boundary derivatives use the lecture's two-point one-sided formula by default.
+The optional --boundary-order 2 uses its three-point Taylor refinement.
+Successive Gauss-Seidel updates are relaxed only in the interior. The stopping criterion
 recomputes the actual PDE and traction equation residuals. Recovered reactions
 and corner stresses are reported separately from this algebraic tolerance.
 """
@@ -16,13 +17,15 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator
-from scipy.sparse import diags, lil_matrix, tril, triu
-from scipy.sparse.linalg import splu
+from scipy.sparse import diags, eye, lil_matrix, tril, triu
+from scipy.sparse.linalg import eigs, splu
 
 plt.rcParams.update({"font.family": "Times New Roman", "mathtext.fontset": "stix", "pdf.fonttype": 42})
 
 
-def assemble(h=0.025, nu=0.3):
+def assemble(h=0.025, nu=0.3, boundary_order=1):
+    if boundary_order not in (1,2):
+        raise ValueError("boundary_order must be 1 or 2.")
     nx, ny = round(2/h), round(1/h)
     if nx < 2 or ny < 2 or abs(nx*h-2) > 1e-12 or abs(ny*h-1) > 1e-12:
         raise ValueError("h must divide both side lengths and give at least two intervals.")
@@ -43,9 +46,9 @@ def assemble(h=0.025, nu=0.3):
         # Coefficients of h*D_x or h*D_y, including corner endpoints.
         position, end = (i,nx) if axis == 0 else (j,ny)
         if position == 0:
-            terms = ((0,-1),(1,1))
+            terms = ((0,-1),(1,1)) if boundary_order == 1 else ((0,-1.5),(1,2),(2,-0.5))
         elif position == end:
-            terms = ((end,1),(end-1,-1))
+            terms = ((end,1),(end-1,-1)) if boundary_order == 1 else ((end,1.5),(end-1,-2),(end-2,0.5))
         else:
             terms = ((position-1,-0.5),(position+1,0.5))
         for position,coefficient in terms:
@@ -124,9 +127,51 @@ ordinary sequence of scalar Gauss-Seidel updates.
     raise RuntimeError(f"True residual did not reach {epsilon:g} in {max_iterations} sweeps.")
 
 
-def recovered_stresses(U,V,h,A,C):
-    uy,ux = np.gradient(U,h,h,edge_order=1)
-    vy,vx = np.gradient(V,h,h,edge_order=1)
+def jacobi(matrix,rhs,scale,epsilon=1e-5,max_iterations=2500000):
+    """Ordinary simultaneous updates, with the same physical residual as SOR."""
+    z = np.zeros_like(rhs)
+    history = []
+    for iteration in range(max_iterations+1):
+        if iteration%100 == 0 or iteration in (10,20,50):
+            norm = float(np.max(np.abs((matrix@z-rhs)*scale)))
+            if iteration%10000 == 0 or iteration in (10,20,50,100,200,300,500,1000,2000,5000) or norm <= epsilon:
+                history.append([iteration,norm])
+            if not np.isfinite(norm) or norm > 1e8:
+                raise RuntimeError(f"Jacobi iteration diverged at sweep {iteration}.")
+            if norm <= epsilon:
+                return z,iteration,history
+        if iteration != max_iterations:
+            z += rhs-matrix@z  # assemble() normalizes the diagonal to one.
+    raise RuntimeError(f"Jacobi did not reach {epsilon:g} in {max_iterations} sweeps.")
+
+
+def compare_iterations(h,epsilon,omega,gauss_seidel_checks,boundary_order=1):
+    """Optional numerical comparison; eigenvalues are estimates, not exact bounds."""
+    x,y,matrix,rhs,scale,interior,op = assemble(h,boundary_order=boundary_order)
+    J = (eye(len(rhs),format="csr")-matrix).tocsr()
+    values,vectors = eigs(J,k=8,which="LM",ncv=80,tol=1e-10,
+                         maxiter=12000,v0=np.linspace(.1,1,len(rhs)))
+    rho = float(max(abs(values)))
+    eigen_residual = max(float(np.linalg.norm(J@vectors[:,k]-values[k]*vectors[:,k],np.inf))
+                         for k in range(len(values)))
+    result = {"h":h,"boundary_order":boundary_order,
+              "jacobi_spectral_radius_estimate":rho,
+              "eigenpair_residual_inf":eigen_residual,
+              "gauss_seidel_iterations":gauss_seidel_checks["iterations"],
+              "gauss_seidel_residual_history":gauss_seidel_checks["residual_history"],
+              "interior_relaxation":omega,"tolerance":epsilon}
+    if rho < 1:
+        z,iterations,history = jacobi(matrix,rhs,scale,epsilon)
+        result.update(jacobi_iterations=iterations,jacobi_residual_history=history,
+                      jacobi_residual_inf=float(np.max(np.abs((matrix@z-rhs)*scale))))
+    else:
+        result["jacobi_note"] = "Estimated spectral radius is not below one; no converged Jacobi result is claimed."
+    return result
+
+
+def recovered_stresses(U,V,h,A,C,boundary_order=1):
+    uy,ux = np.gradient(U,h,h,edge_order=boundary_order)
+    vy,vx = np.gradient(V,h,h,edge_order=boundary_order)
     return ux+C*vy,vy+C*ux,A*(uy+vx)
 
 
@@ -169,13 +214,13 @@ def transfer(previous,x,y):
     return z
 
 
-def solve(h=0.025,nu=0.3,epsilon=1e-5,omega=1.95,previous=None):
-    x,y,matrix,rhs,scale,interior,op = assemble(h,nu)
+def solve(h=0.025,nu=0.3,epsilon=1e-5,omega=1.95,previous=None,boundary_order=1):
+    x,y,matrix,rhs,scale,interior,op = assemble(h,nu,boundary_order)
     z0 = None if previous is None else transfer(previous,x,y)
     z,iterations,history = gauss_seidel(matrix,rhs,scale,interior,epsilon,omega,z0)
     U = z[0::2].reshape(len(y),len(x))
     V = z[1::2].reshape(len(y),len(x))
-    sx,sy,tau = recovered_stresses(U,V,h,op["A"],op["C"])
+    sx,sy,tau = recovered_stresses(U,V,h,op["A"],op["C"],boundary_order)
     resultants = [float(np.trapezoid(tau[:,i],y)) for i in range(len(x))]
     support_y = -resultants[0]
     support_x = -float(np.trapezoid(sx[:,0],y))
@@ -185,7 +230,8 @@ def solve(h=0.025,nu=0.3,epsilon=1e-5,omega=1.95,previous=None):
     jmax,imax = np.unravel_index(np.argmax(mag),mag.shape)
     checks = {
         "mesh_spacing":h,"nodes":len(x)*len(y),"degrees_of_freedom":len(z),
-        "method":"central Navier differences; direct first-order traction equations",
+        "method":f"central Navier differences; direct order-{boundary_order} traction equations",
+        "boundary_derivative_order":boundary_order,
         "linear_solver":"scalar Gauss-Seidel with relaxed interior updates",
         "interior_relaxation":omega,"boundary_relaxation":1.0,
         "initial_guess":"zero" if previous is None else "bilinear transfer from preceding mesh",
@@ -255,7 +301,7 @@ def make_figures(x, y, U, V, output_dir):
         fig, ax = plt.subplots(figsize=(6.934, 3.20), constrained_layout=True)
         for ys, (color, style) in zip(slices, styles):
             j = int(np.argmin(np.abs(y - ys)))
-            ax.plot(x, field[j], color=color, ls=style, lw=1.9, label=f"y = {ys:g}".replace(".", ","))
+            ax.plot(x, field[j], color=color, ls=style, lw=1.9, label=f"y = {y[j]:g}".replace(".", ","))
         ax.set(xlim=(0, 2), xlabel="x", ylabel=component,
                title=f"{component}(x, y) на горизонтальных сечениях")
         ax.grid(True, alpha=0.22)
@@ -274,7 +320,7 @@ def make_figures(x, y, U, V, output_dir):
         for xs, (color, style) in zip(sections, styles):
             i = int(np.argmin(np.abs(x - xs)))
             ax.plot(y, field[:, i], color=color, ls=style, lw=1.9,
-                    label=f"x = {xs:g}".replace(".", ","))
+                    label=f"x = {x[i]:g}".replace(".", ","))
         ax.set(xlim=(0, 1), xlabel="y", ylabel=component,
                title=f"{component}(x, y) на вертикальных сечениях")
         ax.grid(True, alpha=0.22)
@@ -295,12 +341,16 @@ def main():
     parser.add_argument("--meshes", nargs="+", type=float, default=[0.025,0.0125,0.00625])
     parser.add_argument("--omega", type=float, default=1.95)
     parser.add_argument("--epsilon", type=float, default=1e-5)
+    parser.add_argument("--boundary-order",type=int,choices=(1,2),default=1,
+                        help="1: lecture boundary differences; 2: three-point Taylor refinement")
+    parser.add_argument("--compare-iterations",action="store_true",
+                        help="compare ordinary Jacobi with SOR on the first requested mesh")
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True,exist_ok=True)
     runs,previous = [],None
     for h in args.meshes:
         x,y,U,V,sx,tau,resultants,checks = solve(h,epsilon=args.epsilon,
-            omega=args.omega,previous=previous)
+            omega=args.omega,previous=previous,boundary_order=args.boundary_order)
         runs.append(checks)
         previous = (x,y,U,V)
         print(json.dumps(checks,ensure_ascii=False),flush=True)
@@ -321,8 +371,12 @@ def main():
                 writer.writerow(["x","recovered_integral_sigma_xy_dy"])
                 writer.writerows(zip(x,resultants))
             make_figures(x,y,U,V,args.output_dir)
+            if args.compare_iterations:
+                comparison = compare_iterations(h,args.epsilon,args.omega,checks,args.boundary_order)
+                (args.output_dir/"task3_iteration_comparison.json").write_text(
+                    json.dumps(comparison,ensure_ascii=False,indent=2),encoding="utf-8")
         summary={"model":"plane strain, scaled stress sigma/(lambda+2mu)",
-                 "method":"direct finite differences with first-order traction boundaries",
+                 "method":f"direct finite differences with order-{args.boundary_order} traction boundaries",
                  "load":"q(y)=y(1-y) on x=2","runs":runs}
         (args.output_dir/"task3_diagnostics.json").write_text(
             json.dumps(summary,ensure_ascii=False,indent=2),encoding="utf-8")
